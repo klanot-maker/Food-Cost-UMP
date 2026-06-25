@@ -1187,10 +1187,12 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
           </div>
           <button class="cap-filter-btn" onclick="clearLogFilter()">All</button>
         </div>
-        <table class="dtbl">
-          <thead><tr><th>Week</th><th>Chiller Vans</th><th>3-Ton Trucks</th><th>Cafe Vans</th><th>Total Fleet</th></tr></thead>
-          <tbody id="logisticsBody"></tbody>
-        </table>
+        <div style="overflow-x:auto;">
+          <table class="dtbl" id="logisticsChartTable">
+            <thead><tr><th>Week</th><th>Chiller Vans</th><th></th><th>3-Ton Trucks</th><th></th><th>Cafe Vans</th><th></th><th>Total Fleet</th></tr></thead>
+            <tbody id="logisticsBody"></tbody>
+          </table>
+        </div>
       </div>
 
       <!-- ── WOW DISTRICT SUMMARY ── -->
@@ -1210,12 +1212,10 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
           </div>
           <button class="cap-filter-btn" onclick="clearWowFilter()">All</button>
         </div>
-        <div style="overflow-x:auto;">
-          <table class="dtbl" id="wowDistrictTable">
-            <thead id="wowDistrictHead"></thead>
-            <tbody id="wowDistrictBody"></tbody>
-          </table>
+        <div style="position:relative;height:340px;padding:4px 0 8px;">
+          <canvas id="wowDistrictChart"></canvas>
         </div>
+        <div id="wowDistrictNoData" style="display:none;text-align:center;color:var(--lt);padding:20px;font-size:13px;">No WOW DISTRICT data found.</div>
       </div>
 
       <!-- ── DISTRICT DELIVERIES ── -->
@@ -3216,25 +3216,37 @@ function _weekOverlapsFilter(weekStr, filter){
 function renderLogistics(logData){
   var el=document.getElementById('logisticsBody'); if(!el)return;
   if(!logData||logData.error||!logData.rows||!logData.rows.length){
-    el.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--lt);padding:20px">No logistics data. Check UPDATES sheet cols H–J.</td></tr>';
+    el.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--lt);padding:20px">No logistics data. Check UPDATES sheet cols H–J.</td></tr>';
     return;
   }
-  // Sync input defaults for logistics filter
   var lf=document.getElementById('logFrom'), lt=document.getElementById('logTo');
   if(lf&&!lf.value&&_logFilter.from)lf.value=_logFilter.from;
   if(lt&&!lt.value&&_logFilter.to)lt.value=_logFilter.to;
 
   var filtered=logData.rows.filter(function(r){return _weekOverlapsFilter(r.week,_logFilter);});
+  var maxCV=Math.max.apply(null,filtered.map(function(r){return r.chillerVans||0;}))||1;
+  var maxTR=Math.max.apply(null,filtered.map(function(r){return r.trucks||0;}))||1;
+  var maxCF=Math.max.apply(null,filtered.map(function(r){return r.cafeVans||0;}))||1;
+  function bar(val,max,color){
+    var pct=Math.round((val/max)*100);
+    return'<div style="display:flex;align-items:center;gap:6px;min-width:80px;">'
+      +'<div style="flex:1;height:8px;background:var(--card-border);border-radius:4px;overflow:hidden;">'
+      +'<div style="width:'+pct+'%;height:100%;background:'+color+';border-radius:4px;transition:width .3s;"></div></div>'
+      +'<span style="font-size:11px;font-weight:600;color:'+color+';min-width:20px;text-align:right;">'+(val||0)+'</span></div>';
+  }
   el.innerHTML=filtered.map(function(r){
-    var tot=r.chillerVans+r.trucks+r.cafeVans;
+    var tot=(r.chillerVans||0)+(r.trucks||0)+(r.cafeVans||0);
     return'<tr>'
-      +'<td class="cat" style="white-space:nowrap">'+r.week+'</td>'
-      +'<td class="mn" style="font-weight:600;color:#1A8FE3">'+(r.chillerVans||'—')+'</td>'
-      +'<td class="mn" style="font-weight:600;color:var(--amb)">'+(r.trucks||'—')+'</td>'
-      +'<td class="mn" style="font-weight:600;color:#9B59B6">'+(r.cafeVans||'—')+'</td>'
-      +'<td class="mn" style="font-weight:700">'+(tot||'—')+'</td>'
+      +'<td class="cat" style="white-space:nowrap;font-size:12px;">'+r.week+'</td>'
+      +'<td style="font-weight:700;color:#1A8FE3;text-align:center;padding:6px 4px;">'+(r.chillerVans||0)+'</td>'
+      +'<td style="min-width:90px;padding:6px 8px;">'+bar(r.chillerVans||0,maxCV,'#1A8FE3')+'</td>'
+      +'<td style="font-weight:700;color:var(--amb);text-align:center;padding:6px 4px;">'+(r.trucks||0)+'</td>'
+      +'<td style="min-width:60px;padding:6px 8px;">'+bar(r.trucks||0,maxTR,'#C07A10')+'</td>'
+      +'<td style="font-weight:700;color:#9B59B6;text-align:center;padding:6px 4px;">'+(r.cafeVans||0)+'</td>'
+      +'<td style="min-width:60px;padding:6px 8px;">'+bar(r.cafeVans||0,maxCF,'#9B59B6')+'</td>'
+      +'<td style="font-weight:800;text-align:center;padding:6px 8px;color:var(--txt);">'+tot+'</td>'
       +'</tr>';
-  }).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--lt);padding:20px">No data for selected range.</td></tr>';
+  }).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--lt);padding:20px">No data for selected range.</td></tr>';
 }
 
 function _fmtWowPct(v){
@@ -3246,27 +3258,66 @@ function _fmtWowPct(v){
   return'<span class="'+cls+'">'+(n>0?'+':'')+n.toFixed(1)+'%</span>';
 }
 
+var _wowChartInst = null;
 function renderWowDistrict(wowData){
-  var hEl=document.getElementById('wowDistrictHead');
-  var bEl=document.getElementById('wowDistrictBody');
-  if(!hEl||!bEl)return;
+  var canvas=document.getElementById('wowDistrictChart');
+  var noData=document.getElementById('wowDistrictNoData');
+  if(!canvas)return;
   if(!wowData||wowData.error||!wowData.headers||!wowData.headers.length){
-    bEl.innerHTML='<tr><td colspan="2" style="text-align:center;color:var(--lt);padding:20px">No WOW DISTRICT data found.</td></tr>';
-    return;
+    canvas.style.display='none'; if(noData)noData.style.display='block'; return;
   }
-  // Sync input defaults for WoW filter
   var wf=document.getElementById('wowFrom'), wt=document.getElementById('wowTo');
   if(wf&&!wf.value&&_wowFilter.from)wf.value=_wowFilter.from;
   if(wt&&!wt.value&&_wowFilter.to)wt.value=_wowFilter.to;
 
   var hdrs=wowData.headers;
   var rows=(wowData.rows||[]).filter(function(r){return _weekOverlapsFilter(r.week,_wowFilter);});
-  hEl.innerHTML='<tr><th>Week Range</th>'+hdrs.map(function(h){return'<th>'+h+'</th>';}).join('')+'</tr>';
-  bEl.innerHTML=rows.map(function(r){
-    return'<tr><td class="cat" style="white-space:nowrap">'+r.week+'</td>'
-      +r.values.map(function(v){return'<td class="mn">'+_fmtWowPct(v)+'</td>';}).join('')
-      +'</tr>';
-  }).join('')||'<tr><td colspan="'+(hdrs.length+1)+'" style="text-align:center;color:var(--lt);padding:20px">No data for selected range.</td></tr>';
+  if(!rows.length){
+    canvas.style.display='none'; if(noData)noData.style.display='block'; return;
+  }
+  canvas.style.display='block'; if(noData)noData.style.display='none';
+
+  var PALETTE=['#00B368','#1A8FE3','#C07A10','#9B59B6','#E74C3C','#16A085','#F39C12','#2980B9','#8E44AD','#27AE60'];
+  var labels=rows.map(function(r){return r.week;});
+  var datasets=hdrs.map(function(h,i){
+    return{
+      label:h,
+      data:rows.map(function(r){
+        var v=r.values[i];
+        return(v===null||v===undefined||v==='')?null:parseFloat(v)||0;
+      }),
+      backgroundColor:PALETTE[i%PALETTE.length]+'33',
+      borderColor:PALETTE[i%PALETTE.length],
+      borderWidth:2,
+      borderRadius:4,
+      spanGaps:false
+    };
+  });
+
+  if(_wowChartInst){_wowChartInst.destroy();_wowChartInst=null;}
+  _wowChartInst=new Chart(canvas,{
+    type:'bar',
+    data:{labels:labels,datasets:datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{position:'top',labels:{boxWidth:12,font:{size:11},padding:10}},
+        tooltip:{callbacks:{label:function(ctx){
+          var v=ctx.parsed.y;
+          if(v===null)return ctx.dataset.label+': —';
+          return ctx.dataset.label+': '+(v>0?'+':'')+v.toFixed(1)+'%';
+        }}}
+      },
+      scales:{
+        x:{grid:{display:false},ticks:{font:{size:11}}},
+        y:{
+          grid:{color:'rgba(0,0,0,.06)'},
+          ticks:{font:{size:11},callback:function(v){return(v>0?'+':'')+v+'%';}},
+          title:{display:true,text:'WoW %',font:{size:11}}
+        }
+      }
+    }
+  });
 }
 
 function _fmtDistDate(ds){
