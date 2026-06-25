@@ -3271,22 +3271,45 @@ function renderWowDistrict(wowData){
   if(wt&&!wt.value&&_wowFilter.to)wt.value=_wowFilter.to;
 
   var hdrs=wowData.headers;
-  var rows=(wowData.rows||[]).filter(function(r){return _weekOverlapsFilter(r.week,_wowFilter);});
+  var allRows=(wowData.rows||[]).filter(function(r){return _weekOverlapsFilter(r.week,_wowFilter);});
+
+  // Only show the two latest weeks with actual data (non-zero totals)
+  var dataRows=allRows.filter(function(r){
+    return r.values.some(function(v){return v!==null&&v!==undefined&&v!==''&&parseFloat(v)!==0&&!isNaN(parseFloat(v));});
+  });
+  var rows=dataRows.slice(-2);
+
   if(!rows.length){
     canvas.style.display='none'; if(noData)noData.style.display='block'; return;
   }
   canvas.style.display='block'; if(noData)noData.style.display='none';
 
-  var PALETTE=['#00B368','#1A8FE3','#C07A10','#9B59B6','#E74C3C','#16A085','#F39C12','#2980B9','#8E44AD','#27AE60'];
+  // Headers alternate: DXB, %, AUH, %, SHJ, %, …
+  // Extract district name + its % column index (pairs: name at even idx, % at odd idx)
+  var districts=[];
+  for(var i=0;i<hdrs.length-1;i+=2){
+    var name=hdrs[i];
+    var pctIdx=i+1; // the '%' column right after the count column
+    if(name&&name.toLowerCase()!=='%') districts.push({name:name, pctIdx:pctIdx});
+  }
+  // Fallback: if headers don't alternate as expected, use every '%'-labelled column
+  if(!districts.length){
+    hdrs.forEach(function(h,i){
+      if(String(h).trim()==='%'&&i>0) districts.push({name:hdrs[i-1]||('Col'+(i-1)), pctIdx:i});
+    });
+  }
+
+  var PALETTE=['#00B368','#1A8FE3','#C07A10','#9B59B6','#E74C3C','#16A085','#F39C12','#2980B9'];
   var labels=rows.map(function(r){return r.week;});
-  var datasets=hdrs.map(function(h,i){
+  var datasets=districts.map(function(d,i){
     return{
-      label:h,
+      label:d.name,
       data:rows.map(function(r){
-        var v=r.values[i];
-        return(v===null||v===undefined||v==='')?null:parseFloat(v)||0;
+        var v=r.values[d.pctIdx];
+        if(v===null||v===undefined||v==='')return null;
+        var n=parseFloat(v); return isNaN(n)?null:n;
       }),
-      backgroundColor:PALETTE[i%PALETTE.length]+'33',
+      backgroundColor:PALETTE[i%PALETTE.length]+'44',
       borderColor:PALETTE[i%PALETTE.length],
       borderWidth:2,
       borderRadius:4,
