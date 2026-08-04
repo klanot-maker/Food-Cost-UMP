@@ -1425,7 +1425,7 @@ function _activePage(){
 
 // Open the correct popup for the active page
 // ── Operation Overview date-range picker ─────────────────────
-var _opsCS = {yr: new Date().getFullYear(), mo: new Date().getMonth(), selStart: null, selEnd: null};
+var _opsCS = {yr: new Date().getFullYear(), mo: new Date().getMonth(), selStart: null, selEnd: null, userApplied: false};
 
 function _initOpsDate(){
   if(!_opsCS.selStart){
@@ -1482,6 +1482,7 @@ function pickOpsDay(d){
 function applyOpsDate(){
   document.getElementById('cPopOps').classList.remove('open');
   if(!_opsCS.selStart) return;
+  _opsCS.userApplied = true;
   var s=_opsCS.selStart, e=_opsCS.selEnd||_opsCS.selStart;
   var startDs=s.getFullYear()+'-'+_p2(s.getMonth()+1)+'-'+_p2(s.getDate());
   var endDs=e.getFullYear()+'-'+_p2(e.getMonth()+1)+'-'+_p2(e.getDate());
@@ -1539,9 +1540,9 @@ function _renderOpsForDate(ds, endDs){
   _renderManpowerDepts(depts, rangeLabel);
 
   // DOD: sum across range
-  _renderDodKpisForDate(ds, endDs);
+  _renderDodKpisForDate(ds, endDs, _opsCS.userApplied);
   // Logistics: average across range
-  _renderLogisticsKpisForDate(ds, endDs);
+  _renderLogisticsKpisForDate(ds, endDs, _opsCS.userApplied);
 }
 
 function _fmtHeroDate(ds){
@@ -1595,11 +1596,15 @@ function _deptColorOps(n){
   return 'var(--br)';
 }
 
-function _renderDodKpisForDate(ds, endDs){
+function _renderDodKpisForDate(ds, endDs, isExplicitRange){
   endDs = endDs || ds;
   var dodData=(DATA.opsOverview&&DATA.opsOverview.dodAllRecords)||[];
   var headers=(DATA.opsOverview&&DATA.opsOverview.dodHeaders)||[];
-  // Sum all records in range; fallback to latest if none found
+  // Sum all records in range. Only fall back to the latest logged record when
+  // the caller has NOT explicitly chosen this date/range (e.g. the very first
+  // render before the user has picked anything) — otherwise an explicitly
+  // selected range with zero complaints would incorrectly display whatever
+  // complaint was last logged on some earlier date.
   var inRange=dodData.filter(function(r){return r.dateStr>=ds&&r.dateStr<=endDs;});
   var cats={}, dodTotal=0;
   if(inRange.length){
@@ -1607,7 +1612,7 @@ function _renderDodKpisForDate(ds, endDs){
       Object.keys(r.cats||{}).forEach(function(k){cats[k]=(cats[k]||0)+(r.cats[k]||0);});
       dodTotal+=r.total||0;
     });
-  } else if(dodData.length){
+  } else if(dodData.length && !isExplicitRange){
     var sorted=dodData.slice().sort(function(a,b){return b.dateStr.localeCompare(a.dateStr);});
     var dod=sorted[0];
     cats=dod.cats||{}; dodTotal=dod.total||0;
@@ -1667,13 +1672,14 @@ function _renderDodKpisForDate(ds, endDs){
   });
 }
 
-function _renderLogisticsKpisForDate(ds, endDs){
+function _renderLogisticsKpisForDate(ds, endDs, isExplicitRange){
   endDs = endDs || ds;
   var rows=(DATA.opsOverview&&DATA.opsOverview.logisticsRows)||[];
   var el=document.getElementById('opsLogisticsKpiRow');
   if(!el)return;
   if(!rows.length){el.innerHTML='<div style="grid-column:1/-1;color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">No logistics data available.</div>';return;}
-  // Average across range; fallback to latest
+  // Average across range. Only fall back to the latest logged row when this
+  // date/range was NOT explicitly chosen by the user (see _renderDodKpisForDate).
   var inRange=rows.filter(function(r){return r.ds&&r.ds>=ds&&r.ds<=endDs;});
   var isRange=ds!==endDs&&inRange.length>1;
   var dateFmt='';
@@ -1689,8 +1695,10 @@ function _renderLogisticsKpisForDate(ds, endDs){
     } else {
       match=inRange[0];
     }
-  } else {
+  } else if(!isExplicitRange){
     var sorted=rows.slice().sort(function(a,b){return b.ds.localeCompare(a.ds);}); match=sorted[0];
+  } else {
+    match={chillerVan:0,truck3ton:0,truckDriver:0,cafeVan:0,helper:0,totalStaff:0};
   }
   if(!dateFmt&&match.ds){var dp=match.ds.split('-');if(dp.length===3){var dd2=new Date(parseInt(dp[0]),parseInt(dp[1])-1,parseInt(dp[2]));dateFmt=dd2.getDate()+' '+MO_SHT[dd2.getMonth()]+' '+dd2.getFullYear();}}
   // Monthly average for Chiller Van
