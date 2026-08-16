@@ -1308,7 +1308,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
           <!-- LOGISTICS below DOD -->
           <div class="ops-section-logistics">
             <div class="slbl slbl-logistics" style="margin-bottom:14px;">🚚 Logistics</div>
-            <div class="ops-complaints-row" id="opsLogisticsKpiRow" style="grid-template-columns:repeat(3,1fr)!important;">
+            <div class="ops-complaints-row" id="opsLogisticsKpiRow" style="grid-template-columns:repeat(4,1fr)!important;">
               <div style="grid-column:1/-1;color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">Loading logistics data…</div>
             </div>
           </div>
@@ -1559,19 +1559,21 @@ function _fmtHeroDate(ds){
 }
 
 function _renderManpowerDepts(depts, dateLabel){
-  // Collapse any same-department entries that survived upstream (e.g. from the
-  // staffToday fallback), preferring the one that actually has data for the
-  // selected date so an empty "(last)" twin never renders alongside it.
-  var _seenDept={};
-  (depts||[]).forEach(function(d){
+  // Deduplicate: if a dept appears twice (e.g. one entry with data for the
+  // selected date and one without), keep the one that has data.
+  // The key is trimmed + whitespace-collapsed + lowercased so the same
+  // department spelled differently across monthly sheets ("Kitchen Staff"
+  // vs "KITCHEN STAFF ") merges into a single card instead of duplicating.
+  var seen={};
+  depts.forEach(function(d){
     var key=String(d.name||'').trim().replace(/\s+/g,' ').toLowerCase();
     if(!key) return;
-    if(!_seenDept[key]||(d.hasToday&&!_seenDept[key].hasToday)) _seenDept[key]=d;
+    if(!seen[key]||(d.hasToday&&!seen[key].hasToday)) seen[key]=d;
   });
-  depts=Object.keys(_seenDept).map(function(k){return _seenDept[k];});
+  var dedupedDepts=Object.keys(seen).map(function(k){return seen[k];});
 
   var totalOnDuty=0,totalAL=0,totalSick=0,totalSup=0,totalOff=0;
-  depts.forEach(function(d){
+  dedupedDepts.forEach(function(d){
     totalOnDuty+=d.row.on||0; totalAL+=d.row.al||0;
     totalSick+=d.row.sl||0;   totalSup+=d.row.sup||0; totalOff+=d.row.off||0;
   });
@@ -1584,20 +1586,38 @@ function _renderManpowerDepts(depts, dateLabel){
   if(totalSup>0) chipHtml+='<div style="background:#F3EEF9;border:1px solid #9B59B6;border-radius:12px;padding:3px 10px;font-size:10px;font-weight:700;color:#9B59B6;">Supplier: '+totalSup+'</div>';
   document.getElementById('opsManpowerSummaryChips').innerHTML=chipHtml||'<span style="font-size:10px;color:var(--lt)">—</span>';
   var deptHtml='';
-  if(!depts.length){
+  if(!dedupedDepts.length){
     deptHtml='<div style="grid-column:1/-1;color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">No staff data for this date.</div>';
   } else {
-    depts.forEach(function(d){
+    var maxOn=Math.max.apply(null,dedupedDepts.map(function(d){return(d.row.on||0)+(d.row.sup||0);}));
+    var maxPs=Math.max.apply(null,dedupedDepts.map(function(d){return d.row.ps||0;}));
+    if(!maxOn) maxOn=1; if(!maxPs) maxPs=1;
+    function miniBar(val,max,color,label){
+      var pct=Math.round((val/max)*100);
+      return '<div style="margin-top:6px;">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">'
+        +'<span style="font-size:9px;font-weight:600;color:var(--lt);text-transform:uppercase;letter-spacing:.06em;">'+label+'</span>'
+        +'<span style="font-size:10px;font-weight:700;color:'+color+';">'+val+'</span>'
+        +'</div>'
+        +'<div style="background:rgba(0,0,0,0.07);border-radius:4px;height:6px;overflow:hidden;">'
+        +'<div style="width:'+pct+'%;height:100%;background:'+color+';border-radius:4px;transition:width .4s;"></div>'
+        +'</div></div>';
+    }
+    dedupedDepts.forEach(function(d){
       var col=_deptColorOps(d.name),r=d.row;
+      var combined=(r.on||0)+(r.sup||0);
       deptHtml+='<div class="ops-dept-card-lb" style="border-left-color:'+col+';">'
         +'<div class="ops-dept-name">'+deptEmoji(d.name)+' '+d.name+(d.hasToday?'':' <span style="font-size:8px;color:var(--lt);font-weight:400">(last)</span>')+'</div>'
-        +'<div class="ops-dept-total" style="color:'+col+';">'+(r.on||'—')+'</div>'
+        +'<div class="ops-dept-total" style="color:'+col+';">'+combined+'</div>'
         +'<div class="ops-dept-sub">'
         +'<div class="ops-dept-sub-item"><div class="ops-dept-sub-lbl">Ann. Leave</div><div class="ops-dept-sub-val">'+(r.al||0)+'</div></div>'
         +'<div class="ops-dept-sub-item"><div class="ops-dept-sub-lbl">Sick Leave</div><div class="ops-dept-sub-val">'+(r.sl||0)+'</div></div>'
         +'<div class="ops-dept-sub-item"><div class="ops-dept-sub-lbl">Off Duty / PH</div><div class="ops-dept-sub-val">'+(r.off||0)+'</div></div>'
         +'<div class="ops-dept-sub-item"><div class="ops-dept-sub-lbl">Supplier</div><div class="ops-dept-sub-val" style="color:#9B59B6;">'+(r.sup||0)+'</div></div>'
-        +'</div></div>';
+        +'</div>'
+        +miniBar(r.on||0, maxOn, col, 'On Duty')
+        +miniBar(r.ps||0, maxPs, '#9B59B6', 'Permanent Staff')
+        +'</div>';
     });
   }
   document.getElementById('opsDeptGrid').innerHTML=deptHtml;
@@ -1700,13 +1720,13 @@ function _renderLogisticsKpisForDate(ds, endDs, isExplicitRange){
   var match;
   if(inRange.length){
     if(isRange){
-      match={chillerVan:avgVal('chillerVan'),truck3ton:avgVal('truck3ton'),truckDriver:avgVal('truckDriver'),cafeVan:avgVal('cafeVan'),helper:avgVal('helper'),totalStaff:avgVal('totalStaff')};
+      match={chillerVan:avgVal('chillerVan'),truck3ton:avgVal('truck3ton'),supplyChainTruck:avgVal('supplyChainTruck'),truckDriver:avgVal('truckDriver'),cafeVan:avgVal('cafeVan'),helper:avgVal('helper'),totalStaff:avgVal('totalStaff'),delivery:avgVal('delivery')};
       dateFmt='Avg (range)';
     } else {
       match=inRange[0];
     }
   } else {
-    match={chillerVan:0,truck3ton:0,truckDriver:0,cafeVan:0,helper:0,totalStaff:0};
+    match={chillerVan:0,truck3ton:0,supplyChainTruck:0,truckDriver:0,cafeVan:0,helper:0,totalStaff:0,delivery:0};
   }
   if(!dateFmt&&match.ds){var dp=match.ds.split('-');if(dp.length===3){var dd2=new Date(parseInt(dp[0]),parseInt(dp[1])-1,parseInt(dp[2]));dateFmt=dd2.getDate()+' '+MO_SHT[dd2.getMonth()]+' '+dd2.getFullYear();}}
   // Monthly average for Chiller Van
@@ -1714,20 +1734,27 @@ function _renderLogisticsKpisForDate(ds, endDs, isExplicitRange){
   var _curYM=_now2.getFullYear()+'-'+_p2(_now2.getMonth()+1);
   var _moRows=rows.filter(function(r){return r.ds&&r.ds.substring(0,7)===_curYM&&(r.chillerVan||0)>0;});
   var _cvAvg=_moRows.length?Math.round(_moRows.reduce(function(s,r){return s+(r.chillerVan||0);},0)/_moRows.length):null;
+  var totalVans=(match.chillerVan||0)+(match.truck3ton||0)+(match.supplyChainTruck||0)+(match.truckDriver||0)+(match.cafeVan||0);
+  var avgVansDel=totalVans>0?Math.round((match.delivery||0)/totalVans):0;
   var fields=[
-    {key:'chillerVan',  label:'Chiller Van'},
-    {key:'truck3ton',   label:'3 Ton Truck'},
-    {key:'truckDriver', label:'Truck Driver'},
-    {key:'cafeVan',     label:'Cafe Van'},
-    {key:'helper',      label:'Helper'},
-    {key:'totalStaff',  label:'Total Staff'}
+    {key:'chillerVan',       label:'CHILLER VAN'},
+    {key:'cafeVan',          label:'CAFE VAN'},
+    {key:'truck3ton',        label:'3 TON TRUCK'},
+    {key:'supplyChainTruck', label:'Supply Chain Truck'},
+    {key:'truckDriver',      label:'TRUCK DRIVER'},
+    {key:'helper',           label:'HELPER'},
+    {key:'totalStaff',       label:'TOTAL STAFF'},
+    {key:'_avgVansDel',      label:'Avg Vans / Del'}
   ];
   var html=fields.map(function(f){
-    var v=match[f.key]||0;
     var extra='';
     if(f.key==='chillerVan'&&_cvAvg!==null){
       extra='<div style="position:absolute;bottom:8px;right:10px;font-size:9.5px;color:#D94040;font-weight:700;">avg: '+_cvAvg+'</div>';
     }
+    if(f.key==='_avgVansDel'){
+      return '<div class="kpi static" style="cursor:default;position:relative;background:#00B368;border-color:#00B368;"><div class="kpi-lbl" style="color:#fff;font-weight:700;">'+f.label+'</div><div class="kpi-main"><span class="kpi-num" style="color:#fff;font-weight:800;">'+avgVansDel+'</span></div><div class="kpi-meta" style="color:rgba(255,255,255,0.8);">'+(dateFmt||'—')+'</div></div>';
+    }
+    var v=match[f.key]||0;
     return '<div class="kpi static" style="cursor:default;position:relative;"><div class="kpi-lbl">'+f.label+'</div><div class="kpi-main"><span class="kpi-num">'+v+'</span></div><div class="kpi-meta">'+(dateFmt||'—')+'</div>'+extra+'</div>';
   }).join('');
   el.innerHTML=html;
