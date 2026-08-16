@@ -1385,7 +1385,21 @@ function _ensureLogisticsInvSheet_(ss) {
     sh.getRange(1, 1, 1, LOGISTICS_INV_HEADERS.length).setFontWeight('bold');
     sh.setFrozenRows(1);
   }
+  // "2026-07" is a date as far as Sheets is concerned; left as a date the
+  // month can never be matched back to the page's YYYY-MM again.
+  try { sh.getRange('B:B').setNumberFormat('@'); } catch (e) {}
   return sh;
+}
+
+// Accepts whatever the Month cell turned into and returns YYYY-MM.
+function _normYm_(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) return v.getFullYear() + '-' + pad2(v.getMonth() + 1);
+  var t = String(v == null ? '' : v).trim();
+  var m = t.match(/^(\d{4})-(\d{1,2})/);
+  if (m) return m[1] + '-' + pad2(parseInt(m[2], 10));
+  var d = new Date(t);
+  if (!isNaN(d.getTime())) return d.getFullYear() + '-' + pad2(d.getMonth() + 1);
+  return t;
 }
 
 // ── numeric helpers shared by the parser ──────────────────────
@@ -1415,108 +1429,143 @@ function parseLogisticsInvoiceText(text) {
   var mNo = raw.match(/#\s*(INV[-\s]?[A-Za-z0-9\-\/]+)/i);
   if (mNo) invoiceNo = mNo[1].replace(/\s+/g, '-').toUpperCase();
 
-  var mDate = raw.match(/Invoice\s*Date\s*[:\-]\s*([0-9]{1,2}\s+[A-Za-z]{3,}\s+[0-9]{4})/i);
+  var mDate = raw.match(/Invoice\s*Date\s*[:\-]?\s*([0-9]{1,2}\s+[A-Za-z]{3,}\s+[0-9]{4})/i);
   if (mDate) invoiceDate = mDate[1];
 
   if (/\bAED\b/.test(raw)) currency = 'AED';
   else if (/\bQAR\b/.test(raw)) currency = 'QAR';
   else if (/\bSAR\b/.test(raw)) currency = 'SAR';
 
-  // Supplier sits in the block of non-label lines just above "TAX INVOICE".
-  var taxIdx = -1;
-  for (var i = 0; i < lines.length; i++) { if (/^TAX\s+INVOICE$/i.test(lines[i])) { taxIdx = i; break; } }
-  if (taxIdx > 0) {
+  // ── Supplier ────────────────────────────────────────────────
+  // The vendor block sits above "TAX INVOICE" and above "Bill To".
+  // Both anchors are tried because PDF-to-text conversions order the page
+  // differently depending on how the original was laid out.
+  var isLabel = function(L){ return L.indexOf(':') > -1 || /^POWERED BY/i.test(L); };
+  var isNoise = function(L){
+    return /@|www\.|\.com|^TRN\b|^VAT\b|United Arab Emirates|^P\.?O\.?\s*Box|^Tel\b|^Phone\b/i.test(L);
+  };
+  var takeNameFrom = function(idx){
     var block = [];
-    for (var j = taxIdx - 1; j >= 0; j--) {
+    for (var j = idx - 1; j >= 0 && block.length < 10; j--) {
       var L = lines[j];
       if (L === '') continue;
-      if (L.indexOf(':') > -1) break;
-      if (/^POWERED BY/i.test(L)) break;
+      if (isLabel(L)) break;
       block.unshift(L);
-      if (block.length > 8) break;
     }
     var name = [];
     for (var k = 0; k < block.length; k++) {
       var b = block[k];
-      if (/@|www\.|\.com|^TRN\b|United Arab Emirates|^P\.?O\.?\s*Box/i.test(b)) break;
+      if (isNoise(b)) break;
       if (k > 0 && !/^(LLC|L\.L\.C\.?|FZE|FZCO|WLL|W\.L\.L\.?|LTD|CO\.?)$/i.test(b) && name.length >= 1
-          && /[-,\/]|Cluster|Street|Road|Dubai|Abu Dhabi|Sharjah/i.test(b)) break;
+          && /[-,\/]|Cluster|Street|Road|Dubai|Abu Dhabi|Sharjah|Ajman/i.test(b)) break;
       name.push(b);
       if (name.length >= 3) break;
     }
-    supplier = name.join(' ').replace(/\s+/g, ' ').trim();
+    return name.join(' ').replace(/\s+/g, ' ').trim();
+  };
+  for (var t = 0; t < lines.length && !supplier; t++) {
+    if (/TAX\s*INVOICE/i.test(lines[t])) supplier = takeNameFrom(t);
   }
+  if (!supplier) {
+    for (var t2 = 0; t2 < lines.length && !supplier; t2++) {
+      if (/^Bill\s*To\b/i.test(lines[t2])) supplier = takeNameFrom(t2);
+    }
+  }
+  if (!supplier) {
+    // Last resort: the first company-looking line on the page.
+    for (var t3 = 0; t3 < Math.min(lines.length, 40); t3++) {
+      if (/(LLC|L\.L\.C|FZE|FZCO|W\.?L\.?L\.?|LTD)\s*$/i.test(lines[t3]) && !isLabel(lines[t3])) {
+        supplier = lines[t3].trim(); break;
+      }
+    }
+  }
+
   if (!supplier)    warnings.push('Supplier name could not be read — please type it in.');
   if (!invoiceNo)   warnings.push('Invoice number could not be read — please type it in.');
   if (!invoiceDate) warnings.push('Invoice date could not be read — please pick it.');
 
-  // Item headers are numbered 1, 2, 3 … Requiring the next expected number
-  // rejects the hundreds of "11650 184.8" toll/fuel detail rows and lines like
-  // "18 helpers- *1800" that would otherwise look like new items.
-  var itemNames = {}, expected = 1;
+  // ── Line items ──────────────────────────────────────────────
+  // Item headers are numbered 1, 2, 3 … and the number may sit on the same
+  // line as the description or on its own, depending on whether the
+  // converter preserved the invoice table. Requiring the next expected
+  // number rejects the hundreds of "11650 184.8" toll rows and description
+  // lines like "18 helpers- *1800" that otherwise look like item headers.
+  var starts = [], expected = 1;
   for (var a = 0; a < lines.length; a++) {
-    var mi = lines[a].match(/^(\d{1,2})\s+([A-Za-z#].*)$/);
-    if (mi && parseInt(mi[1], 10) === expected) { itemNames[a] = mi[2].trim(); expected++; }
-  }
-  var nameIdx = [];
-  for (var key in itemNames) if (itemNames.hasOwnProperty(key)) nameIdx.push(Number(key));
-  nameIdx.sort(function(x, y){ return x - y; });
-
-  // Each item's figures end with a tax-rate line ("5.00%"): the amount on the
-  // next line is the line total, the last amount before it is the tax. Reading
-  // it this way survives the column wrapping that splits a figure across two
-  // lines (the fuel total arrives as "363,678.1" then "4").
-  var items = [];
-  for (var r = 0; r < lines.length; r++) {
-    if (!/^\d{1,2}(\.\d{1,2})?\s*%$/.test(lines[r])) continue;
-    var rate = _invNum_(lines[r]);
-
-    var total = null;
-    for (var f = r + 1; f < Math.min(r + 4, lines.length); f++) {
-      if (lines[f] === '') continue;
-      if (_invIsAmountLine_(lines[f])) { total = _invNum_(lines[f]); }
-      break;
+    var L = lines[a];
+    var inline = L.match(/^(\d{1,2})\s+([A-Za-z#].*)$/);
+    if (inline && parseInt(inline[1], 10) === expected) {
+      starts.push({ i: a, name: inline[2].trim() }); expected++; continue;
     }
-    var tax = null;
-    for (var pv = r - 1; pv >= Math.max(0, r - 4); pv--) {
-      if (lines[pv] === '') continue;
-      var amts = _invAmountsOn_(lines[pv]);
-      if (amts.length) { tax = amts[amts.length - 1]; }
-      break;
+    if (/^\d{1,2}$/.test(L) && parseInt(L, 10) === expected) {
+      for (var nx = a + 1; nx < Math.min(a + 4, lines.length); nx++) {
+        if (lines[nx] === '') continue;
+        if (/^[A-Za-z#]/.test(lines[nx])) { starts.push({ i: a, name: lines[nx].trim() }); expected++; }
+        break;
+      }
+    }
+  }
+
+  // Within each item block, read the figures by token order rather than by
+  // line position: the amount just before the tax-rate marker is the tax and
+  // the one just after it is the line total. That holds whether each figure
+  // is on its own line or several share one.
+  var TOKEN = /(\d{1,2}(?:\.\d{1,2})?\s*%)|(-?[\d,]*\d\.\d{1,2})/g;
+  var items = [];
+  for (var b2 = 0; b2 < starts.length; b2++) {
+    var from = starts[b2].i;
+    var to = (b2 + 1 < starts.length) ? starts[b2 + 1].i : lines.length;
+    var toks = [], m;
+    for (var li = from; li < to; li++) {
+      TOKEN.lastIndex = 0;
+      while ((m = TOKEN.exec(lines[li])) !== null) {
+        if (m[1]) toks.push({ pct: true });
+        else toks.push({ n: _invNum_(m[2]) });
+      }
+    }
+    var pctAt = -1;
+    for (var q = 0; q < toks.length; q++) { if (toks[q].pct) { pctAt = q; break; } }
+
+    var total = null, tax = null;
+    if (pctAt > -1) {
+      for (var f2 = pctAt + 1; f2 < toks.length; f2++) { if (toks[f2].n !== undefined) { total = toks[f2].n; break; } }
+      for (var p2 = pctAt - 1; p2 >= 0; p2--) { if (toks[p2].n !== undefined) { tax = toks[p2].n; break; } }
+    } else {
+      var nums = toks.filter(function(x){ return x.n !== undefined; }).map(function(x){ return x.n; });
+      if (nums.length >= 2) { total = nums[nums.length - 1]; tax = nums[nums.length - 2]; }
+      else if (nums.length === 1) { total = nums[0]; }
     }
     if (total === null) continue;
 
-    var nm = '';
-    for (var n = nameIdx.length - 1; n >= 0; n--) { if (nameIdx[n] < r) { nm = itemNames[nameIdx[n]]; break; } }
-
     var taxable = (tax !== null) ? (total - tax) : total;
     items.push({
-      description: nm || ('Line ' + (items.length + 1)),
+      description: starts[b2].name || ('Line ' + (items.length + 1)),
       taxable: Math.round(taxable * 100) / 100,
       vat: tax === null ? 0 : Math.round(tax * 100) / 100,
-      total: Math.round(total * 100) / 100,
-      rate: rate
+      total: Math.round(total * 100) / 100
     });
   }
 
+  // ── Invoice totals ──────────────────────────────────────────
   var subTotal = null, vatTotal = null, grandTotal = null;
   var mSub = raw.match(/Sub\s*Total\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})/i);
   if (mSub) { subTotal = _invNum_(mSub[1]); vatTotal = _invNum_(mSub[2]); grandTotal = _invNum_(mSub[3]); }
+  if (subTotal === null || vatTotal === null) {
+    var mTax = raw.match(/Standard\s*Rate\s*\([\d.]+%\)\s*([\d,]+\.\d{2})\s+([\d,]+\.\d{2})/i);
+    if (mTax) { if (subTotal === null) subTotal = _invNum_(mTax[1]); if (vatTotal === null) vatTotal = _invNum_(mTax[2]); }
+  }
   if (grandTotal === null) {
     var mBal = raw.match(/Balance\s*Due\s*[A-Z]{0,3}\s*([\d,]+\.\d{2})/i);
     if (mBal) grandTotal = _invNum_(mBal[1]);
   }
-  if (subTotal === null || vatTotal === null) {
-    var mTax = raw.match(/Standard\s*Rate\s*\([\d.]+%\)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})/i);
-    if (mTax) { if (subTotal === null) subTotal = _invNum_(mTax[1]); if (vatTotal === null) vatTotal = _invNum_(mTax[2]); }
-  }
+  if (grandTotal === null && subTotal !== null && vatTotal !== null) grandTotal = subTotal + vatTotal;
 
   var sumTotal = 0, sumTaxable = 0;
   items.forEach(function(it){ sumTotal += it.total; sumTaxable += it.taxable; });
   sumTotal = Math.round(sumTotal * 100) / 100;
   sumTaxable = Math.round(sumTaxable * 100) / 100;
 
-  if (!items.length) warnings.push('No line items were recognised — add them by hand below.');
+  if (!items.length) warnings.push('No line items were recognised — add them by hand below, and send me the extracted text so the reader can be tuned.');
   if (grandTotal !== null && items.length && Math.abs(sumTotal - grandTotal) > 1) {
     warnings.push('Line items add up to ' + sumTotal.toFixed(2) + ' but the invoice total reads '
       + grandTotal.toFixed(2) + ' — check the lines below.');
@@ -1535,7 +1584,8 @@ function parseLogisticsInvoiceText(text) {
   return {
     supplier: supplier, invoiceNo: invoiceNo, invoiceDate: invoiceDate, ym: ym, currency: currency,
     items: items, subTotal: subTotal, vatTotal: vatTotal, grandTotal: grandTotal,
-    sumTotal: sumTotal, sumTaxable: sumTaxable, warnings: warnings
+    sumTotal: sumTotal, sumTaxable: sumTaxable, warnings: warnings,
+    rawText: raw.length > 12000 ? raw.substring(0, 12000) + '\n… (truncated)' : raw
   };
 }
 
@@ -1596,6 +1646,9 @@ function parseLogisticsInvoiceUpload(base64, filename) {
     var draft = parseLogisticsInvoiceText(text);
     draft.fileUrl = stored;
     draft.ok = true;
+    if (!text || !text.replace(/\s/g, '')) {
+      draft.warnings.push('No text came back from the PDF at all — it may be a scan of an image.');
+    }
     return draft;
   } catch (e) {
     return { ok: false, error: e.message, warnings: [], items: [] };
@@ -1646,7 +1699,9 @@ function saveLogisticsInvoice(payload) {
               payload.currency || 'AED', String(it.description || '').trim(),
               net, vat || 0, tot, now, who, payload.fileUrl || ''];
     });
-    sh.getRange(sh.getLastRow() + 1, 1, rows.length, LOGISTICS_INV_HEADERS.length).setValues(rows);
+    var startRow = sh.getLastRow() + 1;
+    sh.getRange(startRow, 2, rows.length, 1).setNumberFormat('@');
+    sh.getRange(startRow, 1, rows.length, LOGISTICS_INV_HEADERS.length).setValues(rows);
     _invalidateCache();
     return { ok: true, id: id, lines: rows.length };
   } catch (e) {
@@ -1690,7 +1745,7 @@ function getLogisticsInvoiceData() {
         if (dv instanceof Date && !isNaN(dv.getTime())) {
           ds = dv.getDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dv.getMonth()] + ' ' + dv.getFullYear();
         } else { ds = String(dv || ''); }
-        byId[id] = { id: id, ym: String(all[r][1] || ''), supplier: String(all[r][2] || ''),
+        byId[id] = { id: id, ym: _normYm_(all[r][1]), supplier: String(all[r][2] || ''),
                      invoiceNo: String(all[r][3] || ''), invoiceDate: ds,
                      currency: String(all[r][5] || 'AED'), items: [],
                      net: 0, vat: 0, total: 0,

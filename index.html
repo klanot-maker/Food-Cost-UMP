@@ -1357,6 +1357,8 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
     <!-- PAGE: LOGISTICS COST -->
     <div class="page" id="page-logistics">
 
+      <div id="lgcFlash" style="display:none;background:var(--brl);border:1.5px solid var(--br);color:var(--brd);border-radius:var(--rs);padding:9px 14px;margin-bottom:12px;font-size:12px;font-weight:700;"></div>
+
       <!-- Controls -->
       <div class="lgc-card" style="margin-bottom:18px;">
         <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end;">
@@ -1519,6 +1521,22 @@ var _lgcPrefsLoaded=false;
 // or leaving it open across a month rollover — always lands on "now".
 var _lgcUserPickedMonth=false;
 var _lgcPickedYM=null;
+
+function _lgcMonthLabel(ym){
+  if(!ym) return 'the selected month';
+  var p=String(ym).split('-');
+  return MO_LNG[parseInt(p[1],10)-1]+' '+p[0];
+}
+
+// Brief, self-clearing confirmation above the month controls.
+function _lgcFlash(msg){
+  var el=document.getElementById('lgcFlash');
+  if(!el) return;
+  el.textContent=msg;
+  el.style.display='block';
+  clearTimeout(el._t);
+  el._t=setTimeout(function(){ el.style.display='none'; },6000);
+}
 
 function _lgcCurrentYM(){
   var d=new Date();
@@ -1953,6 +1971,11 @@ function _showInvoiceDraft(d){
       +d.warnings.map(function(w){return '<li>'+w+'</li>';}).join('')+'</ul></div>'
     : '<div style="background:var(--brl);border:1.5px solid var(--br);color:var(--brd);border-radius:var(--rs);padding:9px 12px;margin-bottom:14px;font-size:11.5px;font-weight:700;">✅ Read cleanly — line items reconcile to the invoice total.</div>';
 
+  var rawWrap=document.getElementById('lgcInvRawWrap');
+  var rawBox=document.getElementById('lgcInvRaw');
+  if(d.rawText){ rawBox.value=d.rawText; rawWrap.style.display='block'; rawWrap.open=!(d.items&&d.items.length); }
+  else { rawWrap.style.display='none'; }
+
   var tb=document.getElementById('lgcInvLines');
   tb.innerHTML='';
   (d.items&&d.items.length?d.items:[{description:'',taxable:null,vat:null,total:null}])
@@ -2027,7 +2050,14 @@ function saveInvoice(replace){
         return;
       }
       closeInvoiceModal();
-      _lgcLoadInvoices(function(){ renderLogisticsCost(); });
+      // Jump to the invoice's own month — saving a July bill while viewing
+      // August otherwise looks as though nothing happened.
+      _lgcUserPickedMonth=true; _lgcPickedYM=payload.ym;
+      _lgcLoadInvoices(function(){
+        _lgcInit();
+        renderLogisticsCost();
+        _lgcFlash('Invoice saved to '+_lgcMonthLabel(payload.ym)+'.');
+      });
     })
     .withFailureHandler(function(e){
       btn.disabled=false; btn.textContent='Save invoice';
@@ -5713,6 +5743,11 @@ _lgReady();
           <div><span class="lgc-ctl-lbl" style="display:block;">Total</span><b id="lgcInvSumTotal" style="color:var(--br);font-size:15px;">0.00</b></div>
         </div>
         <div id="lgcInvSaveMsg" class="lgc-note" style="margin-top:10px;"></div>
+        <details id="lgcInvRawWrap" style="margin-top:12px;display:none;">
+          <summary style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--br);">Show the text read from the PDF</summary>
+          <div class="lgc-note" style="margin:6px 0;">If the line items came out wrong, copy this and send it over — the reader can be tuned to this supplier's layout.</div>
+          <textarea id="lgcInvRaw" readonly style="width:100%;height:190px;font-family:monospace;font-size:10.5px;border:1.5px solid var(--border);border-radius:var(--rs);padding:8px;color:var(--txt);background:#fff;"></textarea>
+        </details>
       </div>
 
     </div>
