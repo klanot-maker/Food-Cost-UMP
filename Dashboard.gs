@@ -1729,7 +1729,7 @@ function sendPasswordReset(email) {
         htmlBody:
           '<p>Hi,</p>' +
           '<p>Click the link below to reset your password. This link expires in 1 hour.</p>' +
-          '<p><a href="' + link + '" style="background:#00B368;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset My Password</a></p>' +
+          '<p><a href="' + link + '" style="background:#00C07F;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset My Password</a></p>' +
           '<p>If you did not request this, ignore this email.</p>' +
           '<p>— CALO UMP Operations Dashboard</p>'
       });
@@ -1763,7 +1763,7 @@ function sendPasswordResetToAdmin(callerEmail, targetEmail) {
         htmlBody:
           '<p>Hi Super Admin,</p>' +
           '<p>Here is the password reset link for <strong>' + targetEmail + '</strong>. Share it with the user or use it to set their password. Expires in 1 hour.</p>' +
-          '<p><a href="' + link + '" style="background:#00B368;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset Password for ' + targetEmail + '</a></p>' +
+          '<p><a href="' + link + '" style="background:#00C07F;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset Password for ' + targetEmail + '</a></p>' +
           '<p>— CALO UMP Operations Dashboard</p>'
       });
       return {ok: true};
