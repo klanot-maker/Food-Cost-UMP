@@ -25,7 +25,9 @@ const GID_DOD_COMPLAINT = 1747363719;
 var _CACHE_CAP   = 'ump_cap_v1';
 var _CACHE_FIN   = 'ump_fin_v1';
 var _CACHE_STAFF = 'ump_staff_v1';
-var _CACHE_OPS   = 'ump_ops_v1';
+// Bumped to v2: the ops payload now carries logistics cost fields, so any
+// payload cached under the old key has the wrong shape and must be dropped.
+var _CACHE_OPS   = 'ump_ops_v2';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 function _invalidateCache() {
@@ -178,6 +180,8 @@ function getOperationOverviewData() {
     todayDod = sorted[0];
   }
 
+  var _logisticsData = getLogisticsStaffData(ssC) || {};
+
   var data = {
     todayDeliveries:    delivByDate[ds1] || 0,
     todayDate:          ds1,
@@ -190,7 +194,8 @@ function getOperationOverviewData() {
     dodComplaintsDate:  todayDod ? (todayDod.dateStr || todayStr) : todayStr,
     dodAllRecords:      dodData.records || [],
     dodHeaders:         dodData.headers || [],
-    logisticsRows:      getLogisticsStaffData(ssC).rows || []
+    logisticsRows:      _logisticsData.rows || [],
+    logisticsMeta:      _logisticsData.meta || null
   };
 
   try {
@@ -1337,7 +1342,28 @@ function getLogisticsStaffData(ss) {
         helperCost:       safeNum(all[r][colOf.helperCost])
       });
     }
-    return { rows: rows };
+    // Diagnostics: what the header row looked like and which column each
+    // field resolved to, so a mis-located column is visible on the page
+    // instead of silently reading as zero.
+    var colLetter = function(i){
+      var s = '', n = i;
+      while (n >= 0) { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; }
+      return s;
+    };
+    var resolved = {};
+    Object.keys(colOf).forEach(function(k){
+      resolved[k] = { index: colOf[k], letter: colLetter(colOf[k]), header: hdr[colOf[k]] || '' };
+    });
+    return {
+      rows: rows,
+      meta: {
+        sheetName:   sheet.getName(),
+        lastColumn:  sheet.getLastColumn(),
+        lastColLetter: colLetter(sheet.getLastColumn() - 1),
+        headers:     hdr,
+        resolved:    resolved
+      }
+    };
   } catch(e) { return { rows: [], error: e.message }; }
 }
 

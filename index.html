@@ -1598,12 +1598,26 @@ function renderLogisticsCost(){
   var hasData=knownCost>0&&deliveries>0;
   var ratio=hasData?(totalInvoice/deliveries):0;
 
-  // Say *which* input is missing rather than rendering a bare 0.00.
+  // Say *which* input is missing rather than rendering a bare 0.00, and show
+  // what the backend actually resolved so a mis-read column is self-evident.
   var why='No data for this month yet.';
   if(knownCost<=0&&deliveries>0){
-    why='No cost figures found for this month. Van / Truck / Helper cost is read from '
-       +'the Logistics sheet (headers “Van Cost”, “Truck Cost”, “Helper Cost”, else columns K–M). '
-       +'Deliveries loaded fine ('+deliveries.toLocaleString()+'), so only the cost columns are missing.';
+    var meta=(DATA.opsOverview&&DATA.opsOverview.logisticsMeta)||null;
+    why='No cost figures found for this month — deliveries loaded fine ('+deliveries.toLocaleString()+'), '
+       +'so only the Van / Truck / Helper cost columns came back empty.';
+    if(!meta){
+      why+=' The backend did not report any column info, which means Dashboard.gs is running an older '
+         +'version — re-paste it and deploy a new version.';
+    } else {
+      var r=meta.resolved||{};
+      var f=function(k){ return r[k]?(r[k].letter+(r[k].header?' “'+r[k].header+'”':' (no header)')):'?'; };
+      why+='<div class="lgc-note" style="margin-top:8px;color:inherit;opacity:.9;">'
+         +'Reading sheet <b>'+(meta.sheetName||'?')+'</b>, which ends at column <b>'+(meta.lastColLetter||'?')+'</b>.<br>'
+         +'Resolved &nbsp;Van Cost → <b>'+f('vanCost')+'</b> &nbsp;·&nbsp; Truck Cost → <b>'+f('truckCost')+'</b>'
+         +' &nbsp;·&nbsp; Helper Cost → <b>'+f('helperCost')+'</b>'
+         +(meta.lastColumn&&meta.lastColumn<13?'<br><b>Column M is beyond the sheet\'s last column</b> — the cost columns are empty or on another tab.':'')
+         +'</div>';
+    }
   } else if(knownCost>0&&deliveries<=0){
     why='Cost figures loaded, but no deliveries found for this month in the DELIVERIES sheet.';
   }
