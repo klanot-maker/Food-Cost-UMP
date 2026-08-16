@@ -1368,6 +1368,352 @@ function getLogisticsStaffData(ss) {
 }
 
 // ════════════════════════════════════════════════════════════
+// LOGISTICS INVOICES — supplier invoices, one row per line item
+// Sheet "LOGISTICS INVOICES" in SS_COMPLAINTS, created on first save.
+// Several invoices may share a month; each keeps its own id so it can be
+// listed and removed on its own.
+// ════════════════════════════════════════════════════════════
+var SHEET_LOGISTICS_INV = 'LOGISTICS INVOICES';
+var LOGISTICS_INV_HEADERS = ['Invoice ID','Month','Supplier','Invoice No','Invoice Date',
+  'Currency','Line Item','Net Amount','VAT','Line Total','Saved At','Saved By','File URL'];
+
+function _ensureLogisticsInvSheet_(ss) {
+  var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
+  if (!sh) {
+    sh = ss.insertSheet(SHEET_LOGISTICS_INV);
+    sh.getRange(1, 1, 1, LOGISTICS_INV_HEADERS.length).setValues([LOGISTICS_INV_HEADERS]);
+    sh.getRange(1, 1, 1, LOGISTICS_INV_HEADERS.length).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+// ── numeric helpers shared by the parser ──────────────────────
+function _invNum_(s) {
+  if (s === null || s === undefined) return null;
+  var t = String(s).replace(/[^0-9.\-]/g, '');
+  if (t === '' || t === '-' || t === '.') return null;
+  var n = parseFloat(t);
+  return isNaN(n) ? null : n;
+}
+function _invIsAmountLine_(l) { return /^-?[\d,]+\.\d{1,2}$/.test(l); }
+function _invAmountsOn_(l) {
+  var m = l.match(/-?[\d,]+\.\d{1,2}/g);
+  return m ? m.map(_invNum_).filter(function(n){ return n !== null; }) : [];
+}
+
+// ── Parse the text of a supplier invoice into a draft ─────────
+// Deliberately conservative: anything it cannot read becomes a warning shown
+// on the confirm screen rather than a silently wrong number.
+function parseLogisticsInvoiceText(text) {
+  var warnings = [];
+  var raw = String(text || '').replace(/ /g, ' ');
+  var lines = raw.split(/\r?\n/).map(function(s){ return s.trim(); });
+
+  var invoiceNo = '', invoiceDate = '', supplier = '', currency = 'AED';
+
+  var mNo = raw.match(/#\s*(INV[-\s]?[A-Za-z0-9\-\/]+)/i);
+  if (mNo) invoiceNo = mNo[1].replace(/\s+/g, '-').toUpperCase();
+
+  var mDate = raw.match(/Invoice\s*Date\s*[:\-]\s*([0-9]{1,2}\s+[A-Za-z]{3,}\s+[0-9]{4})/i);
+  if (mDate) invoiceDate = mDate[1];
+
+  if (/\bAED\b/.test(raw)) currency = 'AED';
+  else if (/\bQAR\b/.test(raw)) currency = 'QAR';
+  else if (/\bSAR\b/.test(raw)) currency = 'SAR';
+
+  // Supplier sits in the block of non-label lines just above "TAX INVOICE".
+  var taxIdx = -1;
+  for (var i = 0; i < lines.length; i++) { if (/^TAX\s+INVOICE$/i.test(lines[i])) { taxIdx = i; break; } }
+  if (taxIdx > 0) {
+    var block = [];
+    for (var j = taxIdx - 1; j >= 0; j--) {
+      var L = lines[j];
+      if (L === '') continue;
+      if (L.indexOf(':') > -1) break;
+      if (/^POWERED BY/i.test(L)) break;
+      block.unshift(L);
+      if (block.length > 8) break;
+    }
+    var name = [];
+    for (var k = 0; k < block.length; k++) {
+      var b = block[k];
+      if (/@|www\.|\.com|^TRN\b|United Arab Emirates|^P\.?O\.?\s*Box/i.test(b)) break;
+      if (k > 0 && !/^(LLC|L\.L\.C\.?|FZE|FZCO|WLL|W\.L\.L\.?|LTD|CO\.?)$/i.test(b) && name.length >= 1
+          && /[-,\/]|Cluster|Street|Road|Dubai|Abu Dhabi|Sharjah/i.test(b)) break;
+      name.push(b);
+      if (name.length >= 3) break;
+    }
+    supplier = name.join(' ').replace(/\s+/g, ' ').trim();
+  }
+  if (!supplier)    warnings.push('Supplier name could not be read — please type it in.');
+  if (!invoiceNo)   warnings.push('Invoice number could not be read — please type it in.');
+  if (!invoiceDate) warnings.push('Invoice date could not be read — please pick it.');
+
+  // Item headers are numbered 1, 2, 3 … Requiring the next expected number
+  // rejects the hundreds of "11650 184.8" toll/fuel detail rows and lines like
+  // "18 helpers- *1800" that would otherwise look like new items.
+  var itemNames = {}, expected = 1;
+  for (var a = 0; a < lines.length; a++) {
+    var mi = lines[a].match(/^(\d{1,2})\s+([A-Za-z#].*)$/);
+    if (mi && parseInt(mi[1], 10) === expected) { itemNames[a] = mi[2].trim(); expected++; }
+  }
+  var nameIdx = [];
+  for (var key in itemNames) if (itemNames.hasOwnProperty(key)) nameIdx.push(Number(key));
+  nameIdx.sort(function(x, y){ return x - y; });
+
+  // Each item's figures end with a tax-rate line ("5.00%"): the amount on the
+  // next line is the line total, the last amount before it is the tax. Reading
+  // it this way survives the column wrapping that splits a figure across two
+  // lines (the fuel total arrives as "363,678.1" then "4").
+  var items = [];
+  for (var r = 0; r < lines.length; r++) {
+    if (!/^\d{1,2}(\.\d{1,2})?\s*%$/.test(lines[r])) continue;
+    var rate = _invNum_(lines[r]);
+
+    var total = null;
+    for (var f = r + 1; f < Math.min(r + 4, lines.length); f++) {
+      if (lines[f] === '') continue;
+      if (_invIsAmountLine_(lines[f])) { total = _invNum_(lines[f]); }
+      break;
+    }
+    var tax = null;
+    for (var pv = r - 1; pv >= Math.max(0, r - 4); pv--) {
+      if (lines[pv] === '') continue;
+      var amts = _invAmountsOn_(lines[pv]);
+      if (amts.length) { tax = amts[amts.length - 1]; }
+      break;
+    }
+    if (total === null) continue;
+
+    var nm = '';
+    for (var n = nameIdx.length - 1; n >= 0; n--) { if (nameIdx[n] < r) { nm = itemNames[nameIdx[n]]; break; } }
+
+    var taxable = (tax !== null) ? (total - tax) : total;
+    items.push({
+      description: nm || ('Line ' + (items.length + 1)),
+      taxable: Math.round(taxable * 100) / 100,
+      vat: tax === null ? 0 : Math.round(tax * 100) / 100,
+      total: Math.round(total * 100) / 100,
+      rate: rate
+    });
+  }
+
+  var subTotal = null, vatTotal = null, grandTotal = null;
+  var mSub = raw.match(/Sub\s*Total\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})/i);
+  if (mSub) { subTotal = _invNum_(mSub[1]); vatTotal = _invNum_(mSub[2]); grandTotal = _invNum_(mSub[3]); }
+  if (grandTotal === null) {
+    var mBal = raw.match(/Balance\s*Due\s*[A-Z]{0,3}\s*([\d,]+\.\d{2})/i);
+    if (mBal) grandTotal = _invNum_(mBal[1]);
+  }
+  if (subTotal === null || vatTotal === null) {
+    var mTax = raw.match(/Standard\s*Rate\s*\([\d.]+%\)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})/i);
+    if (mTax) { if (subTotal === null) subTotal = _invNum_(mTax[1]); if (vatTotal === null) vatTotal = _invNum_(mTax[2]); }
+  }
+
+  var sumTotal = 0, sumTaxable = 0;
+  items.forEach(function(it){ sumTotal += it.total; sumTaxable += it.taxable; });
+  sumTotal = Math.round(sumTotal * 100) / 100;
+  sumTaxable = Math.round(sumTaxable * 100) / 100;
+
+  if (!items.length) warnings.push('No line items were recognised — add them by hand below.');
+  if (grandTotal !== null && items.length && Math.abs(sumTotal - grandTotal) > 1) {
+    warnings.push('Line items add up to ' + sumTotal.toFixed(2) + ' but the invoice total reads '
+      + grandTotal.toFixed(2) + ' — check the lines below.');
+  }
+  if (subTotal !== null && items.length && Math.abs(sumTaxable - subTotal) > 1) {
+    warnings.push('Net line amounts add up to ' + sumTaxable.toFixed(2)
+      + ' but the invoice sub-total reads ' + subTotal.toFixed(2) + '.');
+  }
+
+  var ym = '';
+  if (invoiceDate) {
+    var d = new Date(invoiceDate);
+    if (!isNaN(d.getTime())) ym = d.getFullYear() + '-' + pad2(d.getMonth() + 1);
+  }
+
+  return {
+    supplier: supplier, invoiceNo: invoiceNo, invoiceDate: invoiceDate, ym: ym, currency: currency,
+    items: items, subTotal: subTotal, vatTotal: vatTotal, grandTotal: grandTotal,
+    sumTotal: sumTotal, sumTaxable: sumTaxable, warnings: warnings
+  };
+}
+
+// ── PDF → text, via Drive's PDF-to-Doc conversion (with OCR) ───
+// Uses the Drive REST API with the script's own OAuth token, so the Advanced
+// Drive Service does not need enabling by hand. DriveApp is referenced when
+// filing the original, which is what grants the Drive scope.
+function _ocrPdfToText_(blob, name) {
+  var token = ScriptApp.getOAuthToken();
+  var boundary = '-----UMPInvoiceBoundary' + Date.now();
+  var meta = { name: 'ump-ocr-' + (name || 'invoice'), mimeType: 'application/vnd.google-apps.document' };
+
+  var pre = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'
+          + JSON.stringify(meta) + '\r\n--' + boundary + '\r\nContent-Type: application/pdf\r\n\r\n';
+  var post = '\r\n--' + boundary + '--\r\n';
+  var payload = Utilities.newBlob(pre).getBytes()
+    .concat(blob.getBytes())
+    .concat(Utilities.newBlob(post).getBytes());
+
+  var res = UrlFetchApp.fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&ocrLanguage=en',
+    { method: 'post', contentType: 'multipart/related; boundary=' + boundary,
+      payload: payload, headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+
+  if (res.getResponseCode() >= 300) {
+    throw new Error('Could not convert the PDF (Drive said ' + res.getResponseCode() + '). '
+      + 'Re-authorise the script from the Apps Script editor and try again.');
+  }
+  var fileId = JSON.parse(res.getContentText()).id;
+  var text = '';
+  try {
+    text = DocumentApp.openById(fileId).getBody().getText();
+  } finally {
+    try { DriveApp.getFileById(fileId).setTrashed(true); } catch (e) {}
+  }
+  return text;
+}
+
+// Keeps the original PDFs together so a saved figure can be traced back.
+function _umpInvoiceFolder_() {
+  var it = DriveApp.getFoldersByName('UMP Logistics Invoices');
+  return it.hasNext() ? it.next() : DriveApp.createFolder('UMP Logistics Invoices');
+}
+
+// ── Called from the page: read an uploaded PDF into a draft ────
+function parseLogisticsInvoiceUpload(base64, filename) {
+  try {
+    var bytes = Utilities.base64Decode(base64);
+    var blob  = Utilities.newBlob(bytes, 'application/pdf', filename || 'invoice.pdf');
+
+    var stored = null;
+    try {
+      var f = _umpInvoiceFolder_().createFile(blob);
+      stored = f.getUrl();
+    } catch (e) { /* filing is a convenience; never block the parse on it */ }
+
+    var text  = _ocrPdfToText_(blob, filename);
+    var draft = parseLogisticsInvoiceText(text);
+    draft.fileUrl = stored;
+    draft.ok = true;
+    return draft;
+  } catch (e) {
+    return { ok: false, error: e.message, warnings: [], items: [] };
+  }
+}
+
+function saveLogisticsInvoice(payload) {
+  try {
+    if (!payload) throw new Error('Nothing to save.');
+    var items = (payload.items || []).filter(function(it){
+      return String(it.description || '').trim() !== '' || _invNum_(it.total) !== null;
+    });
+    if (!items.length) throw new Error('Add at least one line item before saving.');
+    if (!payload.ym) throw new Error('Pick the month this invoice belongs to.');
+
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var sh = _ensureLogisticsInvSheet_(ss);
+    var all = sh.getDataRange().getValues();
+
+    var supplier  = String(payload.supplier  || '').trim();
+    var invoiceNo = String(payload.invoiceNo || '').trim();
+
+    // Same supplier + invoice number already stored? Replace it rather than
+    // silently double-counting the month.
+    var dupId = null;
+    for (var r = 1; r < all.length; r++) {
+      if (String(all[r][2]).trim().toLowerCase() === supplier.toLowerCase() &&
+          String(all[r][3]).trim().toLowerCase() === invoiceNo.toLowerCase() && invoiceNo) {
+        dupId = String(all[r][0]); break;
+      }
+    }
+    if (dupId && !payload.replace) {
+      return { ok: false, duplicate: true,
+               error: 'Invoice ' + invoiceNo + ' from ' + supplier + ' is already saved.' };
+    }
+    if (dupId) _deleteInvoiceRows_(sh, dupId);
+
+    var id = 'INV' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    var now = new Date();
+    var who = '';
+    try { who = Session.getActiveUser().getEmail() || ''; } catch (e) {}
+
+    var rows = items.map(function(it){
+      var net = _invNum_(it.taxable), vat = _invNum_(it.vat), tot = _invNum_(it.total);
+      if (tot === null) tot = (net || 0) + (vat || 0);
+      if (net === null) net = tot - (vat || 0);
+      return [id, payload.ym, supplier, invoiceNo, payload.invoiceDate || '',
+              payload.currency || 'AED', String(it.description || '').trim(),
+              net, vat || 0, tot, now, who, payload.fileUrl || ''];
+    });
+    sh.getRange(sh.getLastRow() + 1, 1, rows.length, LOGISTICS_INV_HEADERS.length).setValues(rows);
+    _invalidateCache();
+    return { ok: true, id: id, lines: rows.length };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function _deleteInvoiceRows_(sh, id) {
+  var all = sh.getDataRange().getValues();
+  for (var r = all.length - 1; r >= 1; r--) {
+    if (String(all[r][0]) === String(id)) sh.deleteRow(r + 1);
+  }
+}
+
+function deleteLogisticsInvoice(id) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
+    if (!sh) return { ok: true };
+    _deleteInvoiceRows_(sh, id);
+    _invalidateCache();
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// Grouped back into invoices for the page.
+function getLogisticsInvoiceData() {
+  try {
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
+    if (!sh) return { invoices: [] };
+    var all = sh.getDataRange().getValues();
+    if (all.length < 2) return { invoices: [] };
+
+    var byId = {}, order = [];
+    for (var r = 1; r < all.length; r++) {
+      var id = String(all[r][0] || '');
+      if (!id) continue;
+      if (!byId[id]) {
+        var dv = all[r][4], ds = '';
+        if (dv instanceof Date && !isNaN(dv.getTime())) {
+          ds = dv.getDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dv.getMonth()] + ' ' + dv.getFullYear();
+        } else { ds = String(dv || ''); }
+        byId[id] = { id: id, ym: String(all[r][1] || ''), supplier: String(all[r][2] || ''),
+                     invoiceNo: String(all[r][3] || ''), invoiceDate: ds,
+                     currency: String(all[r][5] || 'AED'), items: [],
+                     net: 0, vat: 0, total: 0,
+                     savedBy: String(all[r][11] || ''), fileUrl: String(all[r][12] || '') };
+        order.push(id);
+      }
+      var inv = byId[id];
+      var net = safeNum(all[r][7]), vat = safeNum(all[r][8]), tot = safeNum(all[r][9]);
+      inv.items.push({ description: String(all[r][6] || ''), taxable: net, vat: vat, total: tot });
+      inv.net += net; inv.vat += vat; inv.total += tot;
+    }
+    var out = order.map(function(id){
+      var v = byId[id];
+      v.net = Math.round(v.net * 100) / 100;
+      v.vat = Math.round(v.vat * 100) / 100;
+      v.total = Math.round(v.total * 100) / 100;
+      return v;
+    });
+    return { invoices: out };
+  } catch (e) { return { invoices: [], error: e.message }; }
+}
+
+// ════════════════════════════════════════════════════════════
 // WOW DISTRICT — WOW DISTRICT sheet (read-only summary)
 // Row 1 = headers (Col A = week range, remaining = district acronyms)
 // ════════════════════════════════════════════════════════════
