@@ -1362,7 +1362,8 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
         <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end;">
           <div>
             <div class="lgc-ctl-lbl">Month</div>
-            <select id="lgcMonth" class="lgc-input" style="min-width:150px;" onchange="renderLogisticsCost()"></select>
+            <select id="lgcMonth" class="lgc-input" style="min-width:170px;" onchange="_lgcPickMonth(this.value)"></select>
+            <span id="lgcMonthReset" onclick="_lgcResetMonth()" style="display:none;margin-left:8px;font-size:11px;font-weight:700;color:var(--br);cursor:pointer;text-decoration:underline;">back to current month</span>
           </div>
           <div>
             <div class="lgc-ctl-lbl">Target (cost / delivery)</div>
@@ -1502,7 +1503,17 @@ function showPage(id) {
 //   Deliveries come from the DELIVERIES sheet.
 //   Lower is better: exceeding the target means cost per delivery is too high.
 // ════════════════════════════════════════════════════════════
-var _lgcReady=false;
+var _lgcPrefsLoaded=false;
+// The month selector defaults to the current calendar month. It only stops
+// tracking it once the user picks a month themselves, so opening the page —
+// or leaving it open across a month rollover — always lands on "now".
+var _lgcUserPickedMonth=false;
+var _lgcPickedYM=null;
+
+function _lgcCurrentYM(){
+  var d=new Date();
+  return d.getFullYear()+'-'+_p2(d.getMonth()+1);
+}
 
 function _lgcSave(){
   try{
@@ -1511,15 +1522,44 @@ function _lgcSave(){
   }catch(e){}
 }
 
+// Called from the dropdown: from here on, honour the user's choice.
+function _lgcPickMonth(ym){
+  _lgcUserPickedMonth=true;
+  _lgcPickedYM=ym;
+  _lgcSyncMonthReset();
+  renderLogisticsCost();
+}
+
+// Drop back to following the current month.
+function _lgcResetMonth(){
+  _lgcUserPickedMonth=false;
+  _lgcPickedYM=null;
+  _lgcInit();
+  renderLogisticsCost();
+}
+
+// Show the "back to current month" link only while viewing another month.
+function _lgcSyncMonthReset(){
+  var el=document.getElementById('lgcMonthReset');
+  if(!el) return;
+  var sel=document.getElementById('lgcMonth');
+  el.style.display=(sel&&sel.value&&sel.value!==_lgcCurrentYM())?'inline':'none';
+}
+
 function _lgcInit(){
-  if(_lgcReady) return;
-  _lgcReady=true;
-  try{
-    var t=localStorage.getItem('lgcTarget'), c=localStorage.getItem('lgcCoverage');
-    if(t!==null&&t!=='') document.getElementById('lgcTarget').value=t;
-    if(c!==null&&c!=='') document.getElementById('lgcCoverage').value=c;
-  }catch(e){}
-  // Month list = every month that has either cost rows or delivery records.
+  // Target / coverage are restored once; the month list is rebuilt on every
+  // visit so newly loaded data and a changed current month are reflected.
+  if(!_lgcPrefsLoaded){
+    _lgcPrefsLoaded=true;
+    try{
+      var t=localStorage.getItem('lgcTarget'), c=localStorage.getItem('lgcCoverage');
+      if(t!==null&&t!=='') document.getElementById('lgcTarget').value=t;
+      if(c!==null&&c!=='') document.getElementById('lgcCoverage').value=c;
+    }catch(e){}
+  }
+  // Months that have cost rows or delivery records, plus the current month —
+  // which is offered even with nothing logged yet, so the page opens on the
+  // month you are actually in rather than the last one containing data.
   var months={};
   ((DATA.opsOverview&&DATA.opsOverview.logisticsRows)||[]).forEach(function(r){
     if(r.ds) months[r.ds.substring(0,7)]=1;
@@ -1527,14 +1567,22 @@ function _lgcInit(){
   ((DATA.deliveries&&DATA.deliveries.records)||[]).forEach(function(r){
     if(r.dateStr) months[r.dateStr.substring(0,7)]=1;
   });
+  var nowYM=_lgcCurrentYM();
+  months[nowYM]=1;
+
   var keys=Object.keys(months).sort().reverse();
   var sel=document.getElementById('lgcMonth');
-  if(!keys.length){ sel.innerHTML='<option value="">No data</option>'; return; }
   sel.innerHTML=keys.map(function(k){
     var p=k.split('-');
-    return '<option value="'+k+'">'+MO_LNG[parseInt(p[1],10)-1]+' '+p[0]+'</option>';
+    var lbl=MO_LNG[parseInt(p[1],10)-1]+' '+p[0]+(k===nowYM?' (current)':'');
+    return '<option value="'+k+'">'+lbl+'</option>';
   }).join('');
-  sel.value=keys[0];
+
+  var want=(_lgcUserPickedMonth&&_lgcPickedYM&&keys.indexOf(_lgcPickedYM)!==-1)
+             ? _lgcPickedYM : nowYM;
+  sel.value=want;
+  if(!sel.value) sel.value=keys[0];
+  _lgcSyncMonthReset();
 }
 
 function _lgcMoney(n){
