@@ -1734,7 +1734,9 @@ function _renderLogisticsKpisForDate(ds, endDs, isExplicitRange){
   var _curYM=_now2.getFullYear()+'-'+_p2(_now2.getMonth()+1);
   var _moRows=rows.filter(function(r){return r.ds&&r.ds.substring(0,7)===_curYM&&(r.chillerVan||0)>0;});
   var _cvAvg=_moRows.length?Math.round(_moRows.reduce(function(s,r){return s+(r.chillerVan||0);},0)/_moRows.length):null;
-  var totalVans=(match.chillerVan||0)+(match.truck3ton||0)+(match.supplyChainTruck||0)+(match.truckDriver||0)+(match.cafeVan||0);
+  // Vehicles only. Truck Driver and Helper are headcount, not vehicles, so
+  // they must not inflate the divisor of a deliveries-per-van figure.
+  var totalVans=(match.chillerVan||0)+(match.truck3ton||0)+(match.cafeVan||0)+(match.supplyChainTruck||0);
   var avgVansDel=totalVans>0?Math.round((match.delivery||0)/totalVans):0;
   var fields=[
     {key:'chillerVan',       label:'CHILLER VAN'},

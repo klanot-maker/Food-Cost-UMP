@@ -1268,8 +1268,13 @@ function getLogisticsData(ss) {
 
 // ════════════════════════════════════════════════════════════
 // LOGISTICS STAFF — "Logistics" sheet in SS_COMPLAINTS
-// Row 1 = headers; Col A=Delivery Date, B=Chiller Van, C=3 Ton Truck,
-// D=Truck Driver, E=Cafe Van, F=Helper, G=Total Staff
+// Row 1 = headers; Col A=Date, B=Vans, C=3 Ton Truck, D=Truck Driver,
+// E=Cafe Van, F=Helper, G=Supply Chain Truck, H=Total Staff, I=Delivery
+//
+// Columns are resolved by reading the header row rather than by fixed
+// position, so inserting or reordering a column in the sheet no longer
+// silently feeds the wrong figure to a tile. The positional defaults
+// below are only used if a header cannot be matched.
 // ════════════════════════════════════════════════════════════
 function getLogisticsStaffData(ss) {
   try {
@@ -1278,6 +1283,29 @@ function getLogisticsStaffData(ss) {
     if (!sheet) return { rows: [] };
     var all = sheet.getDataRange().getValues();
     if (all.length < 2) return { rows: [] };
+
+    // Match each output field to its column by header name.
+    var HEADER_MAP = [
+      { key: 'chillerVan',       fallback: 1, names: ['vans','van','chiller van','chiller vans'] },
+      { key: 'truck3ton',        fallback: 2, names: ['3 ton truck','3 ton trucks','3ton truck','three ton truck'] },
+      { key: 'truckDriver',      fallback: 3, names: ['truck driver','truck drivers'] },
+      { key: 'cafeVan',          fallback: 4, names: ['cafe van','cafe vans','café van'] },
+      { key: 'helper',           fallback: 5, names: ['helper','helpers'] },
+      { key: 'supplyChainTruck', fallback: 6, names: ['supply chain truck','supply chain trucks','supplychain truck'] },
+      { key: 'totalStaff',       fallback: 7, names: ['total staff','total staffs'] },
+      { key: 'delivery',         fallback: 8, names: ['delivery','deliveries','total delivery','total deliveries'] }
+    ];
+    var normHdr = function(v){ return String(v == null ? '' : v).trim().replace(/\s+/g,' ').toLowerCase(); };
+    var hdr = (all[0] || []).map(normHdr);
+    var colOf = {};
+    HEADER_MAP.forEach(function(f){
+      var idx = -1;
+      for (var i = 0; i < hdr.length; i++) {
+        if (hdr[i] && f.names.indexOf(hdr[i]) !== -1) { idx = i; break; }
+      }
+      colOf[f.key] = (idx !== -1) ? idx : f.fallback;
+    });
+
     var rows = [];
     for (var r = 1; r < all.length; r++) {
       var dv = all[r][0];
@@ -1291,13 +1319,15 @@ function getLogisticsStaffData(ss) {
       }
       if (!ds) continue;
       rows.push({
-        ds:          ds,
-        chillerVan:  safeNum(all[r][1]),
-        truck3ton:   safeNum(all[r][2]),
-        truckDriver: safeNum(all[r][3]),
-        cafeVan:     safeNum(all[r][4]),
-        helper:      safeNum(all[r][5]),
-        totalStaff:  safeNum(all[r][6])
+        ds:               ds,
+        chillerVan:       safeNum(all[r][colOf.chillerVan]),
+        truck3ton:        safeNum(all[r][colOf.truck3ton]),
+        truckDriver:      safeNum(all[r][colOf.truckDriver]),
+        cafeVan:          safeNum(all[r][colOf.cafeVan]),
+        helper:           safeNum(all[r][colOf.helper]),
+        supplyChainTruck: safeNum(all[r][colOf.supplyChainTruck]),
+        totalStaff:       safeNum(all[r][colOf.totalStaff]),
+        delivery:         safeNum(all[r][colOf.delivery])
       });
     }
     return { rows: rows };
