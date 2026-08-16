@@ -1520,11 +1520,16 @@ function _renderOpsForDate(ds, endDs){
     _rangeSelFmts[_rFmt]=true;
     _rCur.setDate(_rCur.getDate()+1);
   }
+  // Key on a normalised dept name so the same department spelled slightly
+  // differently across monthly sheets (trailing spaces, casing, doubled
+  // spaces) merges into one card instead of rendering a duplicate.
   var deptAccum={};
   allStaffSections.forEach(function(sec){
-    if(!deptAccum[sec.name]) deptAccum[sec.name]={name:sec.name,rows:[]};
+    var key=String(sec.name||'').trim().replace(/\s+/g,' ').toLowerCase();
+    if(!key) return;
+    if(!deptAccum[key]) deptAccum[key]={name:String(sec.name||'').trim().replace(/\s+/g,' '),rows:[]};
     (sec.rows||[]).forEach(function(r){
-      if(_rangeSelFmts[r.dd]) deptAccum[sec.name].rows.push(r);
+      if(_rangeSelFmts[r.dd]) deptAccum[key].rows.push(r);
     });
   });
   var depts=Object.values(deptAccum).map(function(d){
@@ -1554,6 +1559,17 @@ function _fmtHeroDate(ds){
 }
 
 function _renderManpowerDepts(depts, dateLabel){
+  // Collapse any same-department entries that survived upstream (e.g. from the
+  // staffToday fallback), preferring the one that actually has data for the
+  // selected date so an empty "(last)" twin never renders alongside it.
+  var _seenDept={};
+  (depts||[]).forEach(function(d){
+    var key=String(d.name||'').trim().replace(/\s+/g,' ').toLowerCase();
+    if(!key) return;
+    if(!_seenDept[key]||(d.hasToday&&!_seenDept[key].hasToday)) _seenDept[key]=d;
+  });
+  depts=Object.keys(_seenDept).map(function(k){return _seenDept[k];});
+
   var totalOnDuty=0,totalAL=0,totalSick=0,totalSup=0,totalOff=0;
   depts.forEach(function(d){
     totalOnDuty+=d.row.on||0; totalAL+=d.row.al||0;
