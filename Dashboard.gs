@@ -1293,7 +1293,11 @@ function getLogisticsStaffData(ss) {
       { key: 'helper',           fallback: 5, names: ['helper','helpers'] },
       { key: 'supplyChainTruck', fallback: 6, names: ['supply chain truck','supply chain trucks','supplychain truck'] },
       { key: 'totalStaff',       fallback: 7, names: ['total staff','total staffs'] },
-      { key: 'delivery',         fallback: 8, names: ['delivery','deliveries','total delivery','total deliveries'] }
+      { key: 'delivery',         fallback: 8, names: ['delivery','deliveries','total delivery','total deliveries'] },
+      // Cost columns (K–M) feed the Logistics cost page.
+      { key: 'vanCost',          fallback: 10, names: ['van cost','vans cost','van costs'] },
+      { key: 'truckCost',        fallback: 11, names: ['truck cost','trucks cost','truck costs'] },
+      { key: 'helperCost',       fallback: 12, names: ['helper cost','helpers cost','helper costs'] }
     ];
     var normHdr = function(v){ return String(v == null ? '' : v).trim().replace(/\s+/g,' ').toLowerCase(); };
     var hdr = (all[0] || []).map(normHdr);
@@ -1327,7 +1331,10 @@ function getLogisticsStaffData(ss) {
         helper:           safeNum(all[r][colOf.helper]),
         supplyChainTruck: safeNum(all[r][colOf.supplyChainTruck]),
         totalStaff:       safeNum(all[r][colOf.totalStaff]),
-        delivery:         safeNum(all[r][colOf.delivery])
+        delivery:         safeNum(all[r][colOf.delivery]),
+        vanCost:          safeNum(all[r][colOf.vanCost]),
+        truckCost:        safeNum(all[r][colOf.truckCost]),
+        helperCost:       safeNum(all[r][colOf.helperCost])
       });
     }
     return { rows: rows };
