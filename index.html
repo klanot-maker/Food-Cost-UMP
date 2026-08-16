@@ -500,11 +500,18 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 .ops-dept-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:8px 8px 0 0;}
 .ops-dept-name{font-size:10px;font-weight:700;color:var(--lt);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;}
 .ops-dept-total{font-size:36px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-bottom:10px;}
-/* ── Logistics cost page ── */
-.lgc-ctl-lbl{font-size:9.5px;font-weight:700;color:var(--lt);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;}
-.lgc-input{border:1.5px solid var(--bd);border-radius:8px;padding:7px 10px;font-size:13px;font-weight:700;color:var(--tx);background:#fff;font-family:inherit;outline:none;}
+/* ── Logistics cost page ──
+   Sits on a white sheet so every figure is black-on-white; the body
+   gradient is only visible outside it. */
+#page-logistics.page.active{background:#fff;border-radius:var(--r);padding:20px 22px 24px;box-shadow:0 2px 10px rgba(0,0,0,0.06);color:#000;}
+#page-logistics .lgc-tbl td,#page-logistics .lgc-sec-title{color:#000;}
+.lgc-card{background:#fff;border:1.5px solid var(--border);border-radius:var(--r);padding:16px 18px;}
+.lgc-ctl-lbl{font-size:9.5px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;}
+.lgc-input{border:1.5px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;font-weight:700;color:#000;background:#fff;font-family:inherit;outline:none;}
 .lgc-input:focus{border-color:#00B368;}
-.lgc-sec-title{font-size:12px;font-weight:800;color:var(--tx);text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;}
+.lgc-sec-title{font-size:12px;font-weight:800;color:#000;text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;}
+.lgc-note{font-size:11px;color:var(--mut);line-height:1.5;}
+.lgc-empty{color:var(--mut);font-size:12.5px;padding:10px 0;text-align:center;}
 .lgc-verdict{border-radius:14px;padding:16px 20px;margin-bottom:12px;display:flex;flex-wrap:wrap;align-items:center;gap:18px;}
 .lgc-verdict-num{font-size:42px;font-weight:800;line-height:1;letter-spacing:-.02em;}
 .lgc-verdict-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;opacity:.85;margin-bottom:4px;}
@@ -513,11 +520,11 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 .lgc-bar{background:rgba(255,255,255,.35);border-radius:6px;height:9px;overflow:hidden;margin-top:8px;}
 .lgc-bar>div{height:100%;border-radius:6px;transition:width .45s;}
 .lgc-tbl{width:100%;border-collapse:collapse;font-size:12.5px;}
-.lgc-tbl th{text-align:left;font-size:9.5px;font-weight:700;color:var(--lt);text-transform:uppercase;letter-spacing:.06em;padding:7px 10px;border-bottom:1.5px solid var(--bd);}
-.lgc-tbl td{padding:8px 10px;border-bottom:1px solid var(--bd);font-weight:600;}
+.lgc-tbl th{text-align:left;font-size:9.5px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;padding:7px 10px;border-bottom:1.5px solid var(--border);}
+.lgc-tbl td{padding:8px 10px;border-bottom:1px solid var(--border);font-weight:600;color:#000;}
 .lgc-tbl tr:last-child td{border-bottom:none;}
 .lgc-tbl td.num,.lgc-tbl th.num{text-align:right;font-variant-numeric:tabular-nums;}
-.lgc-tbl tr.tot td{font-weight:800;border-top:1.5px solid var(--bd);}
+.lgc-tbl tr.tot td{font-weight:800;border-top:1.5px solid var(--border);}
 .ops-dept-sub{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
 .ops-dept-sub-item{background:var(--page);border-radius:6px;padding:6px 8px;}
 .ops-dept-sub-lbl{font-size:9px;font-weight:600;color:var(--lt);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;}
@@ -1344,7 +1351,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
     <div class="page" id="page-logistics">
 
       <!-- Controls -->
-      <div class="card" style="margin-bottom:14px;">
+      <div class="lgc-card" style="margin-bottom:18px;">
         <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end;">
           <div>
             <div class="lgc-ctl-lbl">Month</div>
@@ -1361,7 +1368,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
               <span style="font-size:13px;font-weight:700;color:var(--lt);">%</span>
             </div>
           </div>
-          <div style="flex:1;min-width:200px;font-size:11px;color:var(--lt);line-height:1.5;">
+          <div class="lgc-note" style="flex:1;min-width:200px;">
             Van + Truck + Helper cost is treated as <b id="lgcCovEcho">54</b>% of the full logistics
             invoice; the total is grossed up from it.
           </div>
@@ -1380,7 +1387,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 
       <!-- Cost breakdown -->
       <div class="lgc-sec-title" style="margin-top:22px;">🧾 Cost Breakdown (month to date)</div>
-      <div class="card"><div id="lgcBreakdown"></div></div>
+      <div class="lgc-card"><div id="lgcBreakdown"></div></div>
 
     </div>
 
@@ -1535,11 +1542,11 @@ function _lgcTile(label,value,meta,accent){
 }
 
 // Verdict banner: green when at/under target, red when over.
-function _lgcVerdict(title,ratio,target,note,hasData){
+function _lgcVerdict(title,ratio,target,note,hasData,why){
   if(!hasData){
-    return '<div class="lgc-verdict" style="background:#F0F4F2;color:#5A7A68;">'
+    return '<div class="lgc-verdict" style="background:#FEF5E7;color:#8A5A08;border:1.5px solid #C07A10;">'
       +'<div><div class="lgc-verdict-lbl">'+title+'</div>'
-      +'<div class="lgc-verdict-msg">No data for this month yet.</div></div></div>';
+      +'<div class="lgc-verdict-msg">'+(why||'No data for this month yet.')+'</div></div></div>';
   }
   var over=ratio>target;
   var bg=over?'#D94040':'#00B368';
@@ -1591,11 +1598,21 @@ function renderLogisticsCost(){
   var hasData=knownCost>0&&deliveries>0;
   var ratio=hasData?(totalInvoice/deliveries):0;
 
+  // Say *which* input is missing rather than rendering a bare 0.00.
+  var why='No data for this month yet.';
+  if(knownCost<=0&&deliveries>0){
+    why='No cost figures found for this month. Van / Truck / Helper cost is read from '
+       +'the Logistics sheet (headers “Van Cost”, “Truck Cost”, “Helper Cost”, else columns K–M). '
+       +'Deliveries loaded fine ('+deliveries.toLocaleString()+'), so only the cost columns are missing.';
+  } else if(knownCost>0&&deliveries<=0){
+    why='Cost figures loaded, but no deliveries found for this month in the DELIVERIES sheet.';
+  }
+
   // ── Month to date ──
   var covPct=Math.round(coverage*10)/10;
   document.getElementById('lgcMtdVerdict').innerHTML=
     _lgcVerdict('Month to date',ratio,target,
-      costDays+' day'+(costDays===1?'':'s')+' of cost · '+delDays+' day'+(delDays===1?'':'s')+' of deliveries',hasData);
+      costDays+' day'+(costDays===1?'':'s')+' of cost · '+delDays+' day'+(delDays===1?'':'s')+' of deliveries',hasData,why);
   document.getElementById('lgcMtdTiles').innerHTML=
      _lgcTile('Known Cost ('+covPct+'%)',_lgcMoney(knownCost),'Van + Truck + Helper','')
     +_lgcTile('Est. Total Invoice',_lgcMoney(totalInvoice),'grossed up from '+covPct+'%','')
@@ -1613,7 +1630,7 @@ function renderLogisticsCost(){
 
   document.getElementById('lgcProjVerdict').innerHTML=
     _lgcVerdict('Projected month end',projRatio,target,
-      'run-rate over '+daysInMonth+' days',projHas);
+      'run-rate over '+daysInMonth+' days',projHas,why);
   document.getElementById('lgcProjTiles').innerHTML=
      _lgcTile('Proj. Known Cost',_lgcMoney(costDays>0?knownCost/costDays*daysInMonth:0),'at current daily rate','')
     +_lgcTile('Proj. Total Invoice',_lgcMoney(projInvoice),'grossed up from '+covPct+'%','')
@@ -1624,7 +1641,7 @@ function renderLogisticsCost(){
   // ── Breakdown ──
   if(!rows.length){
     document.getElementById('lgcBreakdown').innerHTML=
-      '<div style="color:var(--lt);font-size:12px;padding:10px 0;text-align:center;">No cost rows for this month.</div>';
+      '<div class="lgc-empty">No cost rows found for this month in columns K\u2013M of the Logistics sheet.</div>';
   } else {
     var est=totalInvoice-knownCost;
     var pctOf=function(v){ return totalInvoice>0?(Math.round(v/totalInvoice*1000)/10)+'%':'—'; };
@@ -1634,7 +1651,7 @@ function renderLogisticsCost(){
       +'<tr><td>Van Cost</td><td class="num">'+_lgcMoney(vanC)+'</td><td class="num">'+pctOf(vanC)+'</td></tr>'
       +'<tr><td>Truck Cost</td><td class="num">'+_lgcMoney(truckC)+'</td><td class="num">'+pctOf(truckC)+'</td></tr>'
       +'<tr><td>Helper Cost</td><td class="num">'+_lgcMoney(helperC)+'</td><td class="num">'+pctOf(helperC)+'</td></tr>'
-      +'<tr><td style="color:var(--lt);">Remaining invoice (estimated)</td><td class="num" style="color:var(--lt);">'+_lgcMoney(est)+'</td><td class="num" style="color:var(--lt);">'+pctOf(est)+'</td></tr>'
+      +'<tr><td style="color:var(--mut);">Remaining invoice (estimated)</td><td class="num" style="color:var(--mut);">'+_lgcMoney(est)+'</td><td class="num" style="color:var(--mut);">'+pctOf(est)+'</td></tr>'
       +'<tr class="tot"><td>Estimated Total Invoice</td><td class="num">'+_lgcMoney(totalInvoice)+'</td><td class="num">100%</td></tr>'
       +'</tbody></table>';
   }
