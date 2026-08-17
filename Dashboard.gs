@@ -32,7 +32,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-08-17.c';
+var UMP_BUILD    = '2026-08-17.d';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 function _invalidateCache() {
@@ -1615,7 +1615,58 @@ function parseLogisticsInvoiceText(text) {
     };
   }
 
+  // Some converters keep each item's figures beside its description; others
+  // (Drive's, for these invoices) print every description first, then every
+  // "qty rate taxable tax rate%" row, then every line total. Block-based
+  // reading cannot work on the second kind, because item 1's figures land
+  // after item 2's description.
+  //
+  // What holds in both: the two amounts immediately before a rate marker are
+  // that line's taxable amount and its tax, and the rate markers occur in item
+  // order. Pairing those with the item names in order reads either layout.
+  function readByRateMarkers() {
+    var toks = [], m3;
+    for (var li2 = 0; li2 < Math.min(summaryAt, lines.length); li2++) {
+      TOKEN.lastIndex = 0;
+      while ((m3 = TOKEN.exec(lines[li2])) !== null) {
+        if (m3[1]) toks.push({ pct: true });
+        else toks.push({ n: _invNum_(m3[2]) });
+      }
+    }
+    var figures = [];
+    for (var k3 = 0; k3 < toks.length; k3++) {
+      if (!toks[k3].pct) continue;
+      var pair = [];
+      for (var j3 = k3 - 1; j3 >= 0 && pair.length < 2; j3--) {
+        if (toks[j3].n !== undefined) pair.push(toks[j3].n);
+      }
+      if (pair.length < 2) continue;
+      var tax3 = pair[0], taxable3 = pair[1];
+      figures.push({ taxable: Math.round(taxable3 * 100) / 100,
+                     vat: Math.round(tax3 * 100) / 100,
+                     total: Math.round((taxable3 + tax3) * 100) / 100 });
+    }
+    var out3 = [];
+    var n3 = Math.min(figures.length, blocks.length);
+    for (var q3 = 0; q3 < n3; q3++) {
+      out3.push({ category: _invCategory_(blocks[q3].name),
+                  description: blocks[q3].name || ('Line ' + (q3 + 1)),
+                  taxable: figures[q3].taxable, vat: figures[q3].vat, total: figures[q3].total });
+    }
+    return out3;
+  }
+
   var best = null;
+  var pairRead = readByRateMarkers();
+  if (pairRead.length) {
+    var pairSum = 0;
+    pairRead.forEach(function(x){ pairSum += x.total; });
+    pairSum = Math.round(pairSum * 100) / 100;
+    best = { mode: 'rateMarkers', items: pairRead, sum: pairSum, count: pairRead.length,
+             full: pairRead.length >= blocks.length,
+             err: (grandTotal !== null) ? Math.abs(pairSum - grandTotal) : 0 };
+  }
+
   ['afterRate', 'lastTwo', 'largest'].forEach(function(mode){
     var its = [];
     for (var k2 = 0; k2 < blocks.length; k2++) {
