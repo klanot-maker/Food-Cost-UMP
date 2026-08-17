@@ -1372,16 +1372,17 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
             <input id="lgcTarget" class="lgc-input" type="number" step="0.01" min="0" value="8.50" style="width:110px;" oninput="_lgcSave();renderLogisticsCost()"/>
           </div>
           <div>
-            <div class="lgc-ctl-lbl">Known cost coverage</div>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <input id="lgcCoverage" class="lgc-input" type="number" step="0.1" min="1" max="100" value="54" style="width:90px;" oninput="_lgcSave();renderLogisticsCost()"/>
-              <span style="font-size:13px;font-weight:700;color:var(--lt);">%</span>
-            </div>
+            <div class="lgc-ctl-lbl">Fuel · AED / vehicle / day</div>
+            <input id="lgcFuelRate" class="lgc-input" type="number" step="1" min="0" value="200" style="width:110px;" oninput="_lgcSave();renderLogisticsCost()"/>
           </div>
-          <div class="lgc-note" style="flex:1;min-width:240px;">
-            Van + Truck + Helper cost is treated as <b id="lgcCovEcho">54</b>% of the full logistics
-            invoice (VAT included); the total is grossed up from it. Months with a saved invoice use
-            the invoice instead.
+          <div>
+            <div class="lgc-ctl-lbl">Salik · AED / vehicle / day</div>
+            <input id="lgcSalikRate" class="lgc-input" type="number" step="0.5" min="0" value="8" style="width:105px;" oninput="_lgcSave();renderLogisticsCost()"/>
+          </div>
+          <div class="lgc-note" style="flex:1;min-width:250px;">
+            Fixed cost is the actual Van, Truck and Helper spend from columns K–M.
+            Variable cost is assumed: <b id="lgcRateEcho">208</b> AED per vehicle per day
+            (VAT included) across Vans + 3 Ton Trucks. Months with a saved invoice use the invoice instead.
             <div id="lgcCovHint" style="margin-top:5px;"></div>
           </div>
         </div>
@@ -1546,7 +1547,8 @@ function _lgcCurrentYM(){
 function _lgcSave(){
   try{
     localStorage.setItem('lgcTarget',document.getElementById('lgcTarget').value);
-    localStorage.setItem('lgcCoverage',document.getElementById('lgcCoverage').value);
+    localStorage.setItem('lgcFuelRate',document.getElementById('lgcFuelRate').value);
+    localStorage.setItem('lgcSalikRate',document.getElementById('lgcSalikRate').value);
   }catch(e){}
 }
 
@@ -1580,9 +1582,11 @@ function _lgcInit(){
   if(!_lgcPrefsLoaded){
     _lgcPrefsLoaded=true;
     try{
-      var t=localStorage.getItem('lgcTarget'), c=localStorage.getItem('lgcCoverage');
-      if(t!==null&&t!=='') document.getElementById('lgcTarget').value=t;
-      if(c!==null&&c!=='') document.getElementById('lgcCoverage').value=c;
+      var t=localStorage.getItem('lgcTarget');
+      var fr=localStorage.getItem('lgcFuelRate'), sr=localStorage.getItem('lgcSalikRate');
+      if(t!==null&&t!=='')  document.getElementById('lgcTarget').value=t;
+      if(fr!==null&&fr!=='') document.getElementById('lgcFuelRate').value=fr;
+      if(sr!==null&&sr!=='') document.getElementById('lgcSalikRate').value=sr;
     }catch(e){}
   }
   // Months that have cost rows or delivery records, plus the current month —
@@ -1654,41 +1658,50 @@ function _lgcVerdict(title,ratio,target,note,hasData,why){
 function renderLogisticsCost(){
   var ym=document.getElementById('lgcMonth').value;
   var target=parseFloat(document.getElementById('lgcTarget').value);
-  var coverage=parseFloat(document.getElementById('lgcCoverage').value);
+  var fuelRate=parseFloat(document.getElementById('lgcFuelRate').value);
+  var salikRate=parseFloat(document.getElementById('lgcSalikRate').value);
   if(isNaN(target)||target<0) target=0;
-  if(isNaN(coverage)||coverage<=0) coverage=100;
-  if(coverage>100) coverage=100;
-  document.getElementById('lgcCovEcho').textContent=coverage;
+  if(isNaN(fuelRate)||fuelRate<0) fuelRate=0;
+  if(isNaN(salikRate)||salikRate<0) salikRate=0;
+  document.getElementById('lgcRateEcho').textContent=_lgcMoney(fuelRate+salikRate).replace(/\.00$/,'');
 
   var rows=((DATA.opsOverview&&DATA.opsOverview.logisticsRows)||[])
     .filter(function(r){return r.ds&&r.ds.substring(0,7)===ym;});
   var delRecs=((DATA.deliveries&&DATA.deliveries.records)||[])
     .filter(function(r){return r.dateStr&&r.dateStr.substring(0,7)===ym;});
 
-  // Known cost (Van + Truck + Helper) and the days it actually covers.
-  var vanC=0,truckC=0,helperC=0,costDays=0;
+  // FIXED — actual Van, Truck and Helper spend from columns K–M.
+  // VARIABLE — assumed, driven by the fleet on the road each day. Counting
+  // vehicle-days rather than an average fleet means days when vans were added
+  // or taken off are costed as they actually stood.
+  var vanC=0,truckC=0,helperC=0,costDays=0,vehicleDays=0,vehDays=0;
   rows.forEach(function(r){
     var d=(r.vanCost||0)+(r.truckCost||0)+(r.helperCost||0);
     vanC+=r.vanCost||0; truckC+=r.truckCost||0; helperC+=r.helperCost||0;
     if(d>0) costDays++;
+    var veh=(r.chillerVan||0)+(r.truck3ton||0);   // Vans + 3 Ton Trucks only
+    if(veh>0){ vehicleDays+=veh; vehDays++; }
   });
-  var knownCost=vanC+truckC+helperC;
+  var fixedCost=vanC+truckC+helperC;
+  var fuelCost=vehicleDays*fuelRate;
+  var salikCost=vehicleDays*salikRate;
+  var variableCost=fuelCost+salikCost;
+  var knownCost=fixedCost;
+  var estTotal=fixedCost+variableCost;
 
-  // A saved supplier invoice is the actual cost and replaces the gross-up.
-  // Months without one keep the estimate, so the current month still reads
-  // sensibly before its invoice arrives. VAT is excluded so the figure is
-  // comparable with the net daily costs in columns K–M.
+  // A saved supplier invoice is the actual cost and replaces the estimate.
   var invs=_lgcInvoicesFor(ym);
   var isActual=invs.length>0;
   var invNet=0,invVat=0,invGross=0;
   invs.forEach(function(v){ invNet+=v.net||0; invVat+=v.vat||0; invGross+=v.total||0; });
-  // Gross: the cost ratio is measured on what is actually paid, VAT included.
-  var totalInvoice=isActual?invGross:(knownCost/(coverage/100));
+  // Gross: the ratio is measured on what is actually paid, VAT included —
+  // which is also the basis the assumed rates are quoted on.
+  var totalInvoice=isActual?invGross:estTotal;
 
   var deliveries=0,delDays=0;
   delRecs.forEach(function(r){ if((r.actual||0)>0){ deliveries+=r.actual; delDays++; } });
 
-  var hasData=(isActual?totalInvoice>0:knownCost>0)&&deliveries>0;
+  var hasData=totalInvoice>0&&deliveries>0;
   var ratio=hasData?(totalInvoice/deliveries):0;
 
   // Say *which* input is missing rather than rendering a bare 0.00, and show
@@ -1716,18 +1729,20 @@ function renderLogisticsCost(){
   }
 
   // ── Month to date ──
-  var covPct=Math.round(coverage*10)/10;
   var srcNote=isActual
     ? ('invoiced · '+invs.length+' invoice'+(invs.length===1?'':'s'))
-    : (costDays+' day'+(costDays===1?'':'s')+' of cost · '+delDays+' day'+(delDays===1?'':'s')+' of deliveries');
+    : (costDays+' day'+(costDays===1?'':'s')+' of cost · '+vehicleDays.toLocaleString()+' vehicle-days · '
+       +delDays+' day'+(delDays===1?'':'s')+' of deliveries');
   document.getElementById('lgcMtdVerdict').innerHTML=
     _lgcVerdict((isActual?'Actual (invoiced)':'Month to date'),ratio,target,srcNote,hasData,why);
   document.getElementById('lgcMtdTiles').innerHTML=
-     _lgcTile('Known Cost ('+covPct+'%)',_lgcMoney(knownCost),'Van + Truck + Helper (K–M)','')
-    +_lgcTile(isActual?'Actual Invoice (incl. VAT)':'Est. Total Invoice',_lgcMoney(totalInvoice),
-              isActual?('net '+_lgcMoney(invNet)+' + VAT '+_lgcMoney(invVat)):('grossed up from '+covPct+'%'),'')
-    +_lgcTile('Deliveries',deliveries.toLocaleString(),delDays+' day'+(delDays===1?'':'s')+' logged','')
-    +_lgcTile('Cost / Delivery',hasData?_lgcMoney(ratio):'—','target '+_lgcMoney(target),
+     _lgcTile('Fixed Cost',_lgcMoney(fixedCost),'Vans + Trucks + Helpers','')
+    +_lgcTile('Variable Cost',_lgcMoney(variableCost),
+              'Fuel '+_lgcMoney(fuelCost)+' · Salik '+_lgcMoney(salikCost),'')
+    +_lgcTile(isActual?'Actual Invoice':'Estimated Total',_lgcMoney(totalInvoice),
+              isActual?('net '+_lgcMoney(invNet)+' + VAT '+_lgcMoney(invVat)):'fixed + variable, VAT incl.','')
+    +_lgcTile('Cost / Delivery',hasData?_lgcMoney(ratio):'—',
+              deliveries.toLocaleString()+' deliveries · target '+_lgcMoney(target),
               hasData?(ratio>target?'#D94040':'#00C07F'):'');
 
   // ── Projected month end (run-rate on the days logged so far) ──
@@ -1736,7 +1751,10 @@ function renderLogisticsCost(){
   // Once the invoice is in, the month is settled — there is nothing left to
   // project, so the cost side stops being a run-rate and only deliveries are
   // extrapolated if the month is still running.
-  var projInvoice=isActual?totalInvoice:(costDays>0?(totalInvoice/costDays*daysInMonth):0);
+  var projFixed=costDays>0?(fixedCost/costDays*daysInMonth):0;
+  var projVehicleDays=vehDays>0?(vehicleDays/vehDays*daysInMonth):0;
+  var projVariable=projVehicleDays*(fuelRate+salikRate);
+  var projInvoice=isActual?totalInvoice:(projFixed+projVariable);
   var projDeliveries=delDays>0?Math.round(deliveries/delDays*daysInMonth):0;
   var projHas=projInvoice>0&&projDeliveries>0;
   var projRatio=projHas?(projInvoice/projDeliveries):0;
@@ -1746,11 +1764,13 @@ function renderLogisticsCost(){
       isActual?'actual invoice · deliveries run-rate over '+daysInMonth+' days'
               :'run-rate over '+daysInMonth+' days',projHas,why);
   document.getElementById('lgcProjTiles').innerHTML=
-     _lgcTile('Proj. Known Cost',_lgcMoney(costDays>0?knownCost/costDays*daysInMonth:0),'at current daily rate','')
-    +_lgcTile(isActual?'Actual Invoice (incl. VAT)':'Proj. Total Invoice',_lgcMoney(projInvoice),
-              isActual?'from saved invoice':'grossed up from '+covPct+'%','')
-    +_lgcTile('Proj. Deliveries',projDeliveries.toLocaleString(),'at current daily rate','')
-    +_lgcTile(isActual?'Cost / Delivery':'Proj. Cost / Delivery',projHas?_lgcMoney(projRatio):'—','target '+_lgcMoney(target),
+     _lgcTile('Proj. Fixed Cost',_lgcMoney(projFixed),'at current daily rate','')
+    +_lgcTile('Proj. Variable Cost',_lgcMoney(projVariable),
+              Math.round(projVehicleDays).toLocaleString()+' vehicle-days','')
+    +_lgcTile(isActual?'Actual Invoice':'Proj. Total',_lgcMoney(projInvoice),
+              isActual?'from saved invoice':'fixed + variable','')
+    +_lgcTile(isActual?'Cost / Delivery':'Proj. Cost / Delivery',projHas?_lgcMoney(projRatio):'—',
+              projDeliveries.toLocaleString()+' deliveries · target '+_lgcMoney(target),
               projHas?(projRatio>target?'#D94040':'#00C07F'):'');
 
   // ── Breakdown ──
@@ -1772,64 +1792,72 @@ function renderLogisticsCost(){
     document.getElementById('lgcBreakdown').innerHTML=
       '<div class="lgc-empty">No cost rows found for this month in columns K\u2013M of the Logistics sheet.</div>';
   } else {
-    var est=totalInvoice-knownCost;
-    var pctOf=function(v){ return totalInvoice>0?(Math.round(v/totalInvoice*1000)/10)+'%':'—'; };
+    var pctOf=function(v){ return estTotal>0?(Math.round(v/estTotal*1000)/10)+'%':'\u2014'; };
+    var row=function(label,amount,note,muted){
+      return '<tr><td'+(muted?' style="color:var(--mut);"':'')+'>'+label
+        +(note?' <span style="color:var(--mut);font-weight:400;">'+note+'</span>':'')+'</td>'
+        +'<td class="num">'+_lgcMoney(amount)+'</td><td class="num">'+pctOf(amount)+'</td></tr>';
+    };
     document.getElementById('lgcBreakdown').innerHTML=
       '<table class="lgc-tbl"><thead><tr>'
-      +'<th>Component</th><th class="num">Amount</th><th class="num">Share of invoice</th></tr></thead><tbody>'
-      +'<tr><td>Van Cost</td><td class="num">'+_lgcMoney(vanC)+'</td><td class="num">'+pctOf(vanC)+'</td></tr>'
-      +'<tr><td>Truck Cost</td><td class="num">'+_lgcMoney(truckC)+'</td><td class="num">'+pctOf(truckC)+'</td></tr>'
-      +'<tr><td>Helper Cost</td><td class="num">'+_lgcMoney(helperC)+'</td><td class="num">'+pctOf(helperC)+'</td></tr>'
-      +'<tr><td style="color:var(--mut);">Remaining invoice (estimated)</td><td class="num" style="color:var(--mut);">'+_lgcMoney(est)+'</td><td class="num" style="color:var(--mut);">'+pctOf(est)+'</td></tr>'
-      +'<tr class="tot"><td>Estimated Total Invoice</td><td class="num">'+_lgcMoney(totalInvoice)+'</td><td class="num">100%</td></tr>'
+      +'<th>Component</th><th class="num">Amount</th><th class="num">Share</th></tr></thead><tbody>'
+      +'<tr><td colspan="3" style="font-size:9.5px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;padding-top:10px;">Fixed \u2014 actual, from columns K\u2013M</td></tr>'
+      +row('Vans',vanC,'')
+      +row('Trucks',truckC,'')
+      +row('Helpers',helperC,'')
+      +'<tr><td colspan="3" style="font-size:9.5px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;padding-top:12px;">Variable \u2014 assumed, '+vehicleDays.toLocaleString()+' vehicle-days</td></tr>'
+      +row('Fuel',fuelCost,'@ '+_lgcMoney(fuelRate)+' / vehicle / day')
+      +row('Salik',salikCost,'@ '+_lgcMoney(salikRate)+' / vehicle / day')
+      +'<tr class="tot"><td>Estimated Total (VAT incl.)</td><td class="num">'+_lgcMoney(estTotal)+'</td><td class="num">100%</td></tr>'
+      +(isActual
+        ? '<tr><td style="color:var(--mut);">Actual invoice</td><td class="num" style="color:var(--mut);">'+_lgcMoney(invGross)
+          +'</td><td class="num" style="color:'+(estTotal>invGross?'#D94040':'#00C07F')+';font-weight:800;">'
+          +(invGross>0?((estTotal/invGross-1)*100>=0?'+':'')+((estTotal/invGross-1)*100).toFixed(1)+'%':'\u2014')+'</td></tr>'
+        : '')
       +'</tbody></table>';
   }
 
   _lgcRenderInvoiceList(ym,invs);
-  _lgcRenderCoverageHint();
+  _lgcRenderModelCheck();
 }
 
-// Coverage is measurable wherever a month has both the K–M daily costs and a
-// real invoice: it is simply what share of the bill those columns captured.
-// Reading it back from actual months beats carrying a fixed assumption.
-function _lgcCoverageEvidence(){
+// How well the five-component model tracked the months that have a real
+// invoice. Shown rather than silently trusted, because the variable side is
+// an assumption and the only way to know it is to compare it to a bill.
+function _lgcModelVsActual(){
   var rows=(DATA.opsOverview&&DATA.opsOverview.logisticsRows)||[];
-  var out=[];
-  LGC_INVOICES.forEach(function(v){ if(!v.ym) return;
-    if(out.some(function(o){return o.ym===v.ym;})) return;
-    var known=0;
+  var fuelRate=parseFloat(document.getElementById('lgcFuelRate').value);
+  var salikRate=parseFloat(document.getElementById('lgcSalikRate').value);
+  if(isNaN(fuelRate)) fuelRate=0; if(isNaN(salikRate)) salikRate=0;
+  var seen={}, out=[];
+  LGC_INVOICES.forEach(function(v){
+    if(!v.ym||seen[v.ym]) return;
+    seen[v.ym]=1;
+    var fixed=0,vehDaysTotal=0;
     rows.forEach(function(r){
-      if(r.ds&&r.ds.substring(0,7)===v.ym) known+=(r.vanCost||0)+(r.truckCost||0)+(r.helperCost||0);
+      if(!r.ds||r.ds.substring(0,7)!==v.ym) return;
+      fixed+=(r.vanCost||0)+(r.truckCost||0)+(r.helperCost||0);
+      vehDaysTotal+=(r.chillerVan||0)+(r.truck3ton||0);
     });
-    var gross=0;
-    _lgcInvoicesFor(v.ym).forEach(function(x){ gross+=x.total||0; });
-    if(known>0&&gross>0) out.push({ym:v.ym,known:known,gross:gross,pct:known/gross*100});
+    var model=fixed+vehDaysTotal*(fuelRate+salikRate);
+    var actual=0;
+    _lgcInvoicesFor(v.ym).forEach(function(x){ actual+=x.total||0; });
+    if(model>0&&actual>0) out.push({ym:v.ym,model:model,actual:actual,diff:(model/actual-1)*100});
   });
   return out.sort(function(a,b){return a.ym<b.ym?1:-1;});
 }
 
-function _lgcRenderCoverageHint(){
+function _lgcRenderModelCheck(){
   var el=document.getElementById('lgcCovHint');
   if(!el) return;
-  var ev=_lgcCoverageEvidence();
-  if(!ev.length){
-    el.innerHTML='No invoiced month yet has daily costs to measure against, so this stays an assumption.';
-    return;
-  }
+  var ev=_lgcModelVsActual();
+  if(!ev.length){ el.innerHTML=''; return; }
   var lbl=function(ym){var q=ym.split('-');return MO_LNG[parseInt(q[1],10)-1]+' '+q[0];};
-  var parts=ev.slice(0,3).map(function(e){
-    return lbl(e.ym)+' → <b>'+e.pct.toFixed(1)+'%</b> ('+_lgcMoney(e.known)+' of '+_lgcMoney(e.gross)+')';
-  });
-  var avg=ev.reduce(function(a,e){return a+e.pct;},0)/ev.length;
-  el.innerHTML='Measured from invoiced months: '+parts.join(' · ')
-    +' &nbsp;<a href="#" onclick="_lgcApplyCoverage('+avg.toFixed(2)+');return false;" '
-    +'style="color:var(--br);font-weight:700;">use '+avg.toFixed(1)+'%</a>';
-}
-
-function _lgcApplyCoverage(pct){
-  document.getElementById('lgcCoverage').value=pct;
-  _lgcSave();
-  renderLogisticsCost();
+  el.innerHTML='Model vs actual invoice: '+ev.slice(0,3).map(function(e){
+    var col=Math.abs(e.diff)<=5?'var(--brd)':'#C07A10';
+    return lbl(e.ym)+' <b style="color:'+col+';">'+(e.diff>=0?'+':'')+e.diff.toFixed(1)+'%</b>'
+      +' <span style="color:var(--mut);">('+_lgcMoney(e.model)+' vs '+_lgcMoney(e.actual)+')</span>';
+  }).join(' · ');
 }
 
 function _lgcRenderInvoiceList(ym,invs){
