@@ -1375,7 +1375,8 @@ function getLogisticsStaffData(ss) {
 // ════════════════════════════════════════════════════════════
 var SHEET_LOGISTICS_INV = 'LOGISTICS INVOICES';
 var LOGISTICS_INV_HEADERS = ['Invoice ID','Month','Supplier','Invoice No','Invoice Date',
-  'Currency','Line Item','Net Amount','VAT','Line Total','Saved At','Saved By','File URL'];
+  'Currency','Line Item','Net Amount','VAT','Line Total','Saved At','Saved By','File URL',
+  'Invoice Net','Invoice VAT','Invoice Total'];
 
 function _ensureLogisticsInvSheet_(ss) {
   var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
@@ -1388,6 +1389,13 @@ function _ensureLogisticsInvSheet_(ss) {
   // "2026-07" is a date as far as Sheets is concerned; left as a date the
   // month can never be matched back to the page's YYYY-MM again.
   try { sh.getRange('B:B').setNumberFormat('@'); } catch (e) {}
+  // Sheets created before the invoice-level total columns existed.
+  try {
+    if (sh.getLastColumn() < LOGISTICS_INV_HEADERS.length) {
+      sh.getRange(1, 1, 1, LOGISTICS_INV_HEADERS.length).setValues([LOGISTICS_INV_HEADERS]);
+      sh.getRange(1, 1, 1, LOGISTICS_INV_HEADERS.length).setFontWeight('bold');
+    }
+  } catch (e) {}
   return sh;
 }
 
@@ -1528,8 +1536,19 @@ function parseLogisticsInvoiceText(text) {
 
     var total = null, tax = null;
     if (pctAt > -1) {
+      var before = [];
+      for (var p2 = pctAt - 1; p2 >= 0 && before.length < 3; p2--) { if (toks[p2].n !== undefined) before.push(toks[p2].n); }
       for (var f2 = pctAt + 1; f2 < toks.length; f2++) { if (toks[f2].n !== undefined) { total = toks[f2].n; break; } }
-      for (var p2 = pctAt - 1; p2 >= 0; p2--) { if (toks[p2].n !== undefined) { tax = toks[p2].n; break; } }
+      tax = before.length ? before[0] : null;
+      // A line total can never be smaller than its own tax. When it is, the
+      // figure after the rate marker belongs to something else (typically the
+      // next row's quantity), so rebuild the line from the amounts before it.
+      if (total !== null && tax !== null && total < tax) {
+        var taxableGuess = before.length > 1 ? before[1] : null;
+        if (taxableGuess !== null && taxableGuess >= tax) { total = taxableGuess + tax; }
+        else if (taxableGuess !== null) { total = tax; tax = taxableGuess; }
+        else { total = tax; tax = 0; }
+      }
     } else {
       var nums = toks.filter(function(x){ return x.n !== undefined; }).map(function(x){ return x.n; });
       if (nums.length >= 2) { total = nums[nums.length - 1]; tax = nums[nums.length - 2]; }
@@ -1538,8 +1557,9 @@ function parseLogisticsInvoiceText(text) {
     if (total === null) continue;
 
     var taxable = (tax !== null) ? (total - tax) : total;
+    var cleanName = String(starts[b2].name || '').replace(/(\s+\d[\d,\.]{2,})+\s*$/, '').trim();
     items.push({
-      description: starts[b2].name || ('Line ' + (items.length + 1)),
+      description: cleanName || ('Line ' + (items.length + 1)),
       taxable: Math.round(taxable * 100) / 100,
       vat: tax === null ? 0 : Math.round(tax * 100) / 100,
       total: Math.round(total * 100) / 100
@@ -1565,6 +1585,12 @@ function parseLogisticsInvoiceText(text) {
   sumTotal = Math.round(sumTotal * 100) / 100;
   sumTaxable = Math.round(sumTaxable * 100) / 100;
 
+  var bad = items.filter(function(it){ return it.taxable < 0; });
+  if (bad.length) {
+    warnings.push(bad.length + ' line' + (bad.length === 1 ? '' : 's') + ' came out with a negative net amount ('
+      + bad.map(function(b){ return b.description; }).join(', ') + ') — those were misread. '
+      + 'The invoice total below is still correct; fix or delete those lines.');
+  }
   if (!items.length) warnings.push('No line items were recognised — add them by hand below, and send me the extracted text so the reader can be tuned.');
   if (grandTotal !== null && items.length && Math.abs(sumTotal - grandTotal) > 1) {
     warnings.push('Line items add up to ' + sumTotal.toFixed(2) + ' but the invoice total reads '
@@ -1691,13 +1717,30 @@ function saveLogisticsInvoice(payload) {
     var who = '';
     try { who = Session.getActiveUser().getEmail() || ''; } catch (e) {}
 
+    // The invoice's own stated totals are authoritative. Line items are a
+    // breakdown and may be read imperfectly; the bill's own Sub Total is a
+    // single figure and is what the cost must be based on.
+    var sumNet = 0, sumVat = 0, sumTot = 0;
+    items.forEach(function(it){
+      var n = _invNum_(it.taxable) || 0, v = _invNum_(it.vat) || 0;
+      var t = _invNum_(it.total); if (t === null) t = n + v;
+      sumNet += n; sumVat += v; sumTot += t;
+    });
+    var hdrNet = _invNum_(payload.invoiceNet);
+    var hdrVat = _invNum_(payload.invoiceVat);
+    var hdrTot = _invNum_(payload.invoiceTotal);
+    if (hdrTot === null || hdrTot <= 0) { hdrNet = sumNet; hdrVat = sumVat; hdrTot = sumTot; }
+    if (hdrNet === null) hdrNet = hdrTot - (hdrVat || 0);
+    if (hdrVat === null) hdrVat = hdrTot - hdrNet;
+
     var rows = items.map(function(it){
       var net = _invNum_(it.taxable), vat = _invNum_(it.vat), tot = _invNum_(it.total);
       if (tot === null) tot = (net || 0) + (vat || 0);
       if (net === null) net = tot - (vat || 0);
       return [id, payload.ym, supplier, invoiceNo, payload.invoiceDate || '',
               payload.currency || 'AED', String(it.description || '').trim(),
-              net, vat || 0, tot, now, who, payload.fileUrl || ''];
+              net, vat || 0, tot, now, who, payload.fileUrl || '',
+              hdrNet, hdrVat, hdrTot];
     });
     var startRow = sh.getLastRow() + 1;
     sh.getRange(startRow, 2, rows.length, 1).setNumberFormat('@');
@@ -1749,19 +1792,28 @@ function getLogisticsInvoiceData() {
                      invoiceNo: String(all[r][3] || ''), invoiceDate: ds,
                      currency: String(all[r][5] || 'AED'), items: [],
                      net: 0, vat: 0, total: 0,
+                     sumNet: 0, sumVat: 0, sumTotal: 0,
+                     hdrNet: safeNum(all[r][13]), hdrVat: safeNum(all[r][14]), hdrTotal: safeNum(all[r][15]),
                      savedBy: String(all[r][11] || ''), fileUrl: String(all[r][12] || '') };
         order.push(id);
       }
       var inv = byId[id];
       var net = safeNum(all[r][7]), vat = safeNum(all[r][8]), tot = safeNum(all[r][9]);
       inv.items.push({ description: String(all[r][6] || ''), taxable: net, vat: vat, total: tot });
-      inv.net += net; inv.vat += vat; inv.total += tot;
+      inv.sumNet += net; inv.sumVat += vat; inv.sumTotal += tot;
     }
     var out = order.map(function(id){
       var v = byId[id];
-      v.net = Math.round(v.net * 100) / 100;
-      v.vat = Math.round(v.vat * 100) / 100;
-      v.total = Math.round(v.total * 100) / 100;
+      var rd = function(n){ return Math.round(n * 100) / 100; };
+      v.sumNet = rd(v.sumNet); v.sumVat = rd(v.sumVat); v.sumTotal = rd(v.sumTotal);
+      // Prefer the invoice's own totals; fall back to the line sum for rows
+      // saved before those columns existed.
+      var useHdr = v.hdrTotal > 0;
+      v.net   = rd(useHdr ? v.hdrNet   : v.sumNet);
+      v.vat   = rd(useHdr ? v.hdrVat   : v.sumVat);
+      v.total = rd(useHdr ? v.hdrTotal : v.sumTotal);
+      v.fromHeader = useHdr;
+      v.linesMismatch = (v.sumTotal > 0 && Math.abs(v.sumTotal - v.total) > 1);
       return v;
     });
     return { invoices: out };

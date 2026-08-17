@@ -1391,12 +1391,12 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
       <!-- Month to date -->
       <div class="lgc-sec-title">📌 Month to Date</div>
       <div id="lgcMtdVerdict"></div>
-      <div class="ops-complaints-row" id="lgcMtdTiles" style="grid-template-columns:repeat(4,1fr)!important;"></div>
+      <div class="ops-complaints-row" id="lgcMtdTiles" style="grid-template-columns:repeat(5,1fr)!important;"></div>
 
       <!-- Projected month end -->
       <div class="lgc-sec-title" style="margin-top:22px;">🔮 Projected Month End</div>
       <div id="lgcProjVerdict"></div>
-      <div class="ops-complaints-row" id="lgcProjTiles" style="grid-template-columns:repeat(4,1fr)!important;"></div>
+      <div class="ops-complaints-row" id="lgcProjTiles" style="grid-template-columns:repeat(5,1fr)!important;"></div>
 
       <!-- Cost breakdown -->
       <div class="lgc-sec-title" style="margin-top:22px;">🧾 Cost Breakdown (month to date)</div>
@@ -1741,8 +1741,9 @@ function renderLogisticsCost(){
               'Fuel '+_lgcMoney(fuelCost)+' · Salik '+_lgcMoney(salikCost),'')
     +_lgcTile(isActual?'Actual Invoice':'Estimated Total',_lgcMoney(totalInvoice),
               isActual?('net '+_lgcMoney(invNet)+' + VAT '+_lgcMoney(invVat)):'fixed + variable, VAT incl.','')
-    +_lgcTile('Cost / Delivery',hasData?_lgcMoney(ratio):'—',
-              deliveries.toLocaleString()+' deliveries · target '+_lgcMoney(target),
+    +_lgcTile('Total Deliveries',deliveries.toLocaleString(),
+              delDays+' day'+(delDays===1?'':'s')+' logged','')
+    +_lgcTile('Cost / Delivery',hasData?_lgcMoney(ratio):'—','target '+_lgcMoney(target),
               hasData?(ratio>target?'#D94040':'#00C07F'):'');
 
   // ── Projected month end (run-rate on the days logged so far) ──
@@ -1769,8 +1770,9 @@ function renderLogisticsCost(){
               Math.round(projVehicleDays).toLocaleString()+' vehicle-days','')
     +_lgcTile(isActual?'Actual Invoice':'Proj. Total',_lgcMoney(projInvoice),
               isActual?'from saved invoice':'fixed + variable','')
+    +_lgcTile('Proj. Total Deliveries',projDeliveries.toLocaleString(),'at current daily rate','')
     +_lgcTile(isActual?'Cost / Delivery':'Proj. Cost / Delivery',projHas?_lgcMoney(projRatio):'—',
-              projDeliveries.toLocaleString()+' deliveries · target '+_lgcMoney(target),
+              'target '+_lgcMoney(target),
               projHas?(projRatio>target?'#D94040':'#00C07F'):'');
 
   // ── Breakdown ──
@@ -1877,7 +1879,8 @@ function _lgcRenderInvoiceList(ym,invs){
       +'<td style="color:var(--mut);">'+(v.invoiceDate||'—')+'</td>'
       +'<td class="num">'+_lgcMoney(v.net)+'</td>'
       +'<td class="num">'+_lgcMoney(v.vat)+'</td>'
-      +'<td class="num">'+_lgcMoney(v.total)+'</td>'
+      +'<td class="num">'+_lgcMoney(v.total)
+      +(v.linesMismatch?'<div style="font-size:9px;font-weight:700;color:#C07A10;">lines don\u2019t reconcile</div>':'')+'</td>'
       +'<td class="num"><button onclick="removeInvoice(\''+v.id+'\',\''+lbl.replace(/'/g,"")+'\')" '
       +'title="Remove" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;">✕</button></td></tr>';
   });
@@ -1999,6 +2002,12 @@ function _showInvoiceDraft(d){
       +d.warnings.map(function(w){return '<li>'+w+'</li>';}).join('')+'</ul></div>'
     : '<div style="background:var(--brl);border:1.5px solid var(--br);color:var(--brd);border-radius:var(--rs);padding:9px 12px;margin-bottom:14px;font-size:11.5px;font-weight:700;">✅ Read cleanly — line items reconcile to the invoice total.</div>';
 
+  var g=function(id){ return document.getElementById(id); };
+  var setv=function(id,v){ g(id).value=(v===null||v===undefined||v==='')?'':Number(v).toFixed(2); };
+  setv('lgcInvHdrNet',   d.subTotal);
+  setv('lgcInvHdrVat',   d.vatTotal);
+  setv('lgcInvHdrTotal', d.grandTotal);
+
   var rawWrap=document.getElementById('lgcInvRawWrap');
   var rawBox=document.getElementById('lgcInvRaw');
   if(d.rawText){ rawBox.value=d.rawText; rawWrap.style.display='block'; rawWrap.open=!(d.items&&d.items.length); }
@@ -2038,6 +2047,36 @@ function _lgcInvRecalc(){
   document.getElementById('lgcInvSumNet').textContent=_lgcMoney(net);
   document.getElementById('lgcInvSumVat').textContent=_lgcMoney(vat);
   document.getElementById('lgcInvSumTotal').textContent=_lgcMoney(tot);
+
+  var hn=parseFloat(document.getElementById('lgcInvHdrNet').value);
+  var hv=parseFloat(document.getElementById('lgcInvHdrVat').value);
+  var ht=parseFloat(document.getElementById('lgcInvHdrTotal').value);
+  var note=document.getElementById('lgcInvHdrNote');
+  if(isNaN(ht)||ht<=0){
+    note.innerHTML='<span style="color:#8A5A08;font-weight:700;">Enter the invoice total — '
+      +'without it the line items are used instead, and a misread line would understate the cost.</span>'
+      +' <a href="#" onclick="_lgcUseLineSum();return false;" style="color:var(--br);font-weight:700;">use the line items ('+_lgcMoney(tot)+')</a>';
+    return;
+  }
+  var gap=Math.abs(tot-ht);
+  note.innerHTML = gap<=1
+    ? '✅ Line items reconcile to the invoice total.'
+    : '<span style="color:#8A5A08;font-weight:700;">Line items are '+_lgcMoney(gap)+' away from the invoice total.</span> '
+      +'The invoice total is what the dashboard will use, so the cost stays right — but the breakdown below is incomplete.';
+}
+
+function _lgcUseLineSum(){
+  var n=0,v=0,t=0;
+  [].slice.call(document.querySelectorAll('#lgcInvLines tr')).forEach(function(tr){
+    var a=parseFloat(tr.querySelector('.lgc-inv-net').value); if(isNaN(a)) a=0;
+    var b=parseFloat(tr.querySelector('.lgc-inv-vat').value); if(isNaN(b)) b=0;
+    var c=parseFloat(tr.querySelector('.lgc-inv-total').value); if(isNaN(c)) c=a+b;
+    n+=a; v+=b; t+=c;
+  });
+  document.getElementById('lgcInvHdrNet').value=n.toFixed(2);
+  document.getElementById('lgcInvHdrVat').value=v.toFixed(2);
+  document.getElementById('lgcInvHdrTotal').value=t.toFixed(2);
+  _lgcInvRecalc();
 }
 
 function _lgcCollectInvoice(replace){
@@ -2054,7 +2093,10 @@ function _lgcCollectInvoice(replace){
     invoiceDate:document.getElementById('lgcInvDate').value.trim(),
     ym:document.getElementById('lgcInvYm').value,
     currency:document.getElementById('lgcInvCurrency').value.trim()||'AED',
-    items:items, fileUrl:_lgcInvFileUrl, replace:!!replace
+    items:items, fileUrl:_lgcInvFileUrl, replace:!!replace,
+    invoiceNet:parseFloat(document.getElementById('lgcInvHdrNet').value),
+    invoiceVat:parseFloat(document.getElementById('lgcInvHdrVat').value),
+    invoiceTotal:parseFloat(document.getElementById('lgcInvHdrTotal').value)
   };
 }
 
@@ -2063,6 +2105,10 @@ function saveInvoice(replace){
   var msg=document.getElementById('lgcInvSaveMsg');
   if(!payload.supplier){ msg.innerHTML='<span style="color:var(--red);font-weight:700;">Enter the supplier name.</span>'; return; }
   if(!payload.items.length){ msg.innerHTML='<span style="color:var(--red);font-weight:700;">Add at least one line item.</span>'; return; }
+  if(!(payload.invoiceTotal>0)){
+    msg.innerHTML='<span style="color:var(--red);font-weight:700;">Enter the invoice total — that figure is what the dashboard uses.</span>';
+    return;
+  }
   var btn=document.getElementById('lgcInvSaveBtn');
   btn.disabled=true; btn.textContent='Saving…';
   google.script.run
@@ -5766,9 +5812,24 @@ _lgReady();
         <button onclick="addInvoiceLine()" style="background:none;border:1.5px dashed var(--glass-border);border-radius:var(--rs);padding:6px 14px;font-size:11.5px;font-weight:700;color:var(--br);cursor:pointer;font-family:'Lato',sans-serif;">＋ add line</button>
 
         <div style="margin-top:14px;padding-top:12px;border-top:1.5px solid var(--border);display:flex;justify-content:flex-end;gap:26px;font-size:13px;">
-          <div><span class="lgc-ctl-lbl" style="display:block;">Net</span><b id="lgcInvSumNet">0.00</b></div>
-          <div><span class="lgc-ctl-lbl" style="display:block;">VAT</span><b id="lgcInvSumVat">0.00</b></div>
-          <div><span class="lgc-ctl-lbl" style="display:block;">Total</span><b id="lgcInvSumTotal" style="color:var(--br);font-size:15px;">0.00</b></div>
+          <div><span class="lgc-ctl-lbl" style="display:block;">Line items add to</span><b id="lgcInvSumNet">0.00</b>
+               <span style="color:var(--mut);"> + </span><b id="lgcInvSumVat">0.00</b>
+               <span style="color:var(--mut);"> = </span><b id="lgcInvSumTotal">0.00</b></div>
+        </div>
+
+        <div style="margin-top:14px;padding:12px 14px;border:1.5px solid var(--br);border-radius:var(--rs);background:var(--brl);">
+          <div style="font-size:11px;font-weight:800;color:var(--brd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">
+            Invoice total — this is what the dashboard uses
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+            <div><div class="lgc-ctl-lbl">Net (sub total)</div>
+                 <input id="lgcInvHdrNet" class="lgc-input" type="number" step="0.01" style="width:100%;" oninput="_lgcInvRecalc()"/></div>
+            <div><div class="lgc-ctl-lbl">VAT</div>
+                 <input id="lgcInvHdrVat" class="lgc-input" type="number" step="0.01" style="width:100%;" oninput="_lgcInvRecalc()"/></div>
+            <div><div class="lgc-ctl-lbl">Total due</div>
+                 <input id="lgcInvHdrTotal" class="lgc-input" type="number" step="0.01" style="width:100%;font-weight:800;" oninput="_lgcInvRecalc()"/></div>
+          </div>
+          <div id="lgcInvHdrNote" class="lgc-note" style="margin-top:8px;"></div>
         </div>
         <div id="lgcInvSaveMsg" class="lgc-note" style="margin-top:10px;"></div>
         <details id="lgcInvRawWrap" style="margin-top:12px;display:none;">
