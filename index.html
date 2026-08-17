@@ -1701,6 +1701,30 @@ function renderLogisticsCost(){
   // which is also the basis the assumed rates are quoted on.
   var totalInvoice=isActual?invGross:estTotal;
 
+  // On an invoiced month the components come from the invoice's own lines
+  // rather than the model, so every figure on the page traces to the bill.
+  var catAmt={vans:0,trucks:0,helpers:0,fuel:0,salik:0,other:0};
+  if(isActual){
+    var lineSum=0;
+    invs.forEach(function(v){
+      (v.items||[]).forEach(function(it){
+        var c=it.category||_lgcGuessCat(it.description);
+        if(!catAmt.hasOwnProperty(c)) c='other';
+        catAmt[c]+=it.total||0;
+        lineSum+=it.total||0;
+      });
+    });
+    // Whatever the lines fail to account for still has to appear somewhere,
+    // or the components would not add up to the bill.
+    var unallocated=invGross-lineSum;
+    if(Math.abs(unallocated)>1) catAmt.other+=unallocated;
+
+    fixedCost = catAmt.vans+catAmt.trucks+catAmt.helpers;
+    fuelCost  = catAmt.fuel;
+    salikCost = catAmt.salik;
+    variableCost = catAmt.fuel+catAmt.salik+catAmt.other;
+  }
+
   var deliveries=0,delDays=0;
   delRecs.forEach(function(r){ if((r.actual||0)>0){ deliveries+=r.actual; delDays++; } });
 
@@ -1739,9 +1763,12 @@ function renderLogisticsCost(){
   document.getElementById('lgcMtdVerdict').innerHTML=
     _lgcVerdict((isActual?'Actual (invoiced)':'Month to date'),ratio,target,srcNote,hasData,why);
   document.getElementById('lgcMtdTiles').innerHTML=
-     _lgcTile('Fixed Cost',_lgcMoney(fixedCost),'Vans + Trucks + Helpers','')
+     _lgcTile('Fixed Cost',_lgcMoney(fixedCost),
+              isActual?'Vans + Trucks + Helpers (invoiced)':'Vans + Trucks + Helpers','')
     +_lgcTile('Variable Cost',_lgcMoney(variableCost),
-              'Fuel '+_lgcMoney(fuelCost)+' · Salik '+_lgcMoney(salikCost),'')
+              isActual?('Fuel '+_lgcMoney(fuelCost)+' · Salik '+_lgcMoney(salikCost)
+                        +(Math.abs(catAmt.other)>1?' · Other '+_lgcMoney(catAmt.other):''))
+                     :('Fuel '+_lgcMoney(fuelCost)+' · Salik '+_lgcMoney(salikCost)),'')
     +_lgcTile(isActual?'Actual Invoice':'Estimated Total',_lgcMoney(totalInvoice),
               isActual?('net '+_lgcMoney(invNet)+' + VAT '+_lgcMoney(invVat)):'fixed + variable, VAT incl.','')
     +_lgcTile('Total Deliveries',deliveries.toLocaleString(),
@@ -1780,17 +1807,33 @@ function renderLogisticsCost(){
 
   // ── Breakdown ──
   if(isActual){
-    var bd='<table class="lgc-tbl"><thead><tr><th>Line item</th><th>Invoice</th>'
-      +'<th class="num">Net</th><th class="num">VAT</th><th class="num">Total</th></tr></thead><tbody>';
-    invs.forEach(function(v){
-      (v.items||[]).forEach(function(it){
-        bd+='<tr><td>'+it.description+'</td><td style="color:var(--mut);">'+(v.invoiceNo||'—')+'</td>'
-          +'<td class="num">'+_lgcMoney(it.taxable)+'</td><td class="num">'+_lgcMoney(it.vat)+'</td>'
-          +'<td class="num">'+_lgcMoney(it.total)+'</td></tr>';
-      });
-    });
-    bd+='<tr class="tot"><td colspan="2">Total invoiced</td><td class="num">'+_lgcMoney(invNet)
-      +'</td><td class="num">'+_lgcMoney(invVat)+'</td><td class="num">'+_lgcMoney(invGross)+'</td></tr>';
+    var bd='<table class="lgc-tbl"><thead><tr><th>Component</th><th class="num">Amount</th>'
+      +'<th class="num">Share</th></tr></thead><tbody>';
+    var pctI=function(v){ return invGross>0?(Math.round(v/invGross*1000)/10)+'%':'\u2014'; };
+    var head=function(t){ return '<tr><td colspan="3" style="font-size:9.5px;font-weight:700;color:var(--mut);'
+      +'text-transform:uppercase;letter-spacing:.06em;padding-top:10px;">'+t+'</td></tr>'; };
+    var catRow=function(k){
+      var lines=[];
+      invs.forEach(function(v){ (v.items||[]).forEach(function(it){
+        var c=it.category||_lgcGuessCat(it.description);
+        if(!catAmt.hasOwnProperty(c)) c='other';
+        if(c===k) lines.push(it.description);
+      });});
+      var note=lines.length?' <span style="color:var(--mut);font-weight:400;">'+lines.join(', ')+'</span>':'';
+      return '<tr><td>'+_lgcCatLabel(k)+note+'</td><td class="num">'+_lgcMoney(catAmt[k])
+        +'</td><td class="num">'+pctI(catAmt[k])+'</td></tr>';
+    };
+    bd+=head('Fixed \u2014 from the invoice')
+      +catRow('vans')+catRow('trucks')+catRow('helpers')
+      +'<tr class="tot"><td>Fixed total</td><td class="num">'+_lgcMoney(fixedCost)
+      +'</td><td class="num">'+pctI(fixedCost)+'</td></tr>'
+      +head('Variable \u2014 from the invoice')
+      +catRow('fuel')+catRow('salik')
+      +(Math.abs(catAmt.other)>1?catRow('other'):'')
+      +'<tr class="tot"><td>Variable total</td><td class="num">'+_lgcMoney(variableCost)
+      +'</td><td class="num">'+pctI(variableCost)+'</td></tr>'
+      +'<tr class="tot"><td>Invoice total (VAT incl.)</td><td class="num">'+_lgcMoney(invGross)
+      +'</td><td class="num">100%</td></tr>';
     bd+='</tbody></table>';
     document.getElementById('lgcBreakdown').innerHTML=bd;
   } else if(!rows.length){
@@ -1905,6 +1948,31 @@ function _lgcRenderInvoiceList(ym,invs){
 // read of a PDF should never become a silent cost figure.
 // ════════════════════════════════════════════════════════════
 var LGC_INVOICES=[];
+// The five components, plus "other" for anything an invoice carries that fits
+// none of them. Other counts as variable: adjustments and one-off charges
+// behave like variable spend, not like the fixed fleet.
+var LGC_CATS=[
+  {k:'vans',   label:'Vans',    group:'fixed'},
+  {k:'trucks', label:'Trucks',  group:'fixed'},
+  {k:'helpers',label:'Helpers', group:'fixed'},
+  {k:'fuel',   label:'Fuel',    group:'variable'},
+  {k:'salik',  label:'Salik',   group:'variable'},
+  {k:'other',  label:'Other',   group:'variable'}
+];
+function _lgcCatLabel(k){
+  for(var i=0;i<LGC_CATS.length;i++) if(LGC_CATS[i].k===k) return LGC_CATS[i].label;
+  return 'Other';
+}
+function _lgcCatIsFixed(k){ return k==='vans'||k==='trucks'||k==='helpers'; }
+function _lgcGuessCat(desc){
+  var d=String(desc||'').toLowerCase();
+  if(/fuel|diesel|petrol/.test(d)) return 'fuel';
+  if(/salik|toll/.test(d))         return 'salik';
+  if(/helper/.test(d))             return 'helpers';
+  if(/truck/.test(d))              return 'trucks';
+  if(/van/.test(d))                return 'vans';
+  return 'other';
+}
 var _lgcInvFileB64=null, _lgcInvFileName='', _lgcInvFileUrl=null;
 
 var _lgcInvLoaded=false;
@@ -2044,8 +2112,13 @@ function _addInvLineRow(it){
   var tb=document.getElementById('lgcInvLines');
   var tr=document.createElement('tr');
   var v=function(n){ return (n===null||n===undefined||n==='')?'':Number(n).toFixed(2); };
+  var cat=(it&&it.category)||_lgcGuessCat(it&&it.description);
+  var catSel='<select class="lgc-input lgc-inv-cat" style="width:100%;font-weight:600;">'
+    +LGC_CATS.map(function(c){return '<option value="'+c.k+'"'+(c.k===cat?' selected':'')+'>'+c.label+'</option>';}).join('')
+    +'</select>';
   tr.innerHTML=
      '<td><input class="lgc-input lgc-inv-desc" style="width:100%;font-weight:400;" value="'+String((it&&it.description)||'').replace(/"/g,'&quot;')+'"/></td>'
+    +'<td style="width:120px;">'+catSel+'</td>'
     +'<td class="num"><input class="lgc-input lgc-inv-net"   type="number" step="0.01" style="width:110px;text-align:right;" value="'+v(it&&it.taxable)+'" oninput="_lgcInvRecalc()"/></td>'
     +'<td class="num"><input class="lgc-input lgc-inv-vat"   type="number" step="0.01" style="width:95px;text-align:right;"  value="'+v(it&&it.vat)+'"     oninput="_lgcInvRecalc()"/></td>'
     +'<td class="num"><input class="lgc-input lgc-inv-total" type="number" step="0.01" style="width:115px;text-align:right;" value="'+v(it&&it.total)+'"   oninput="_lgcInvRecalc()"/></td>'
@@ -2105,7 +2178,8 @@ function _lgcCollectInvoice(replace){
     var v=parseFloat(tr.querySelector('.lgc-inv-vat').value);
     var t=parseFloat(tr.querySelector('.lgc-inv-total').value);
     if(isNaN(n)) n=null; if(isNaN(v)) v=null; if(isNaN(t)) t=null;
-    return {description:tr.querySelector('.lgc-inv-desc').value, taxable:n, vat:v, total:t};
+    return {description:tr.querySelector('.lgc-inv-desc').value,
+            category:tr.querySelector('.lgc-inv-cat').value, taxable:n, vat:v, total:t};
   }).filter(function(it){ return it.description.trim()!==''||it.total!==null||it.taxable!==null; });
   return {
     supplier:document.getElementById('lgcInvSupplier').value.trim(),
@@ -5872,7 +5946,7 @@ _lgReady();
 
         <div class="lgc-ctl-lbl">Line items</div>
         <table class="lgc-tbl" style="margin-bottom:8px;">
-          <thead><tr><th>Description</th><th class="num">Net</th><th class="num">VAT</th><th class="num">Total</th><th></th></tr></thead>
+          <thead><tr><th>Description</th><th>Category</th><th class="num">Net</th><th class="num">VAT</th><th class="num">Total</th><th></th></tr></thead>
           <tbody id="lgcInvLines"></tbody>
         </table>
         <button onclick="addInvoiceLine()" style="background:none;border:1.5px dashed var(--glass-border);border-radius:var(--rs);padding:6px 14px;font-size:11.5px;font-weight:700;color:var(--br);cursor:pointer;font-family:'Lato',sans-serif;">＋ add line</button>

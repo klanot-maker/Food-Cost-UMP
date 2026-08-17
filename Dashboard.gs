@@ -1378,7 +1378,7 @@ function getLogisticsStaffData(ss) {
 var SHEET_LOGISTICS_INV = 'LOGISTICS INVOICES';
 var LOGISTICS_INV_HEADERS = ['Invoice ID','Month','Supplier','Invoice No','Invoice Date',
   'Currency','Line Item','Net Amount','VAT','Line Total','Saved At','Saved By','File URL',
-  'Invoice Net','Invoice VAT','Invoice Total'];
+  'Invoice Net','Invoice VAT','Invoice Total','Category'];
 
 function _ensureLogisticsInvSheet_(ss) {
   var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
@@ -1411,6 +1411,20 @@ function _normYm_(v) {
   if (!isNaN(d.getTime())) return d.getFullYear() + '-' + pad2(d.getMonth() + 1);
   return t;
 }
+
+// Maps an invoice line to one of the five cost components. Anything that
+// matches none of them is "other", which counts as variable — adjustments and
+// one-off charges behave like variable spend, not like the fixed fleet.
+function _invCategory_(desc) {
+  var d = String(desc || '').toLowerCase();
+  if (/fuel|diesel|petrol/.test(d))            return 'fuel';
+  if (/salik|toll/.test(d))                    return 'salik';
+  if (/helper/.test(d))                        return 'helpers';
+  if (/truck/.test(d))                         return 'trucks';
+  if (/van/.test(d))                           return 'vans';
+  return 'other';
+}
+function _invIsFixedCat_(c) { return c === 'vans' || c === 'trucks' || c === 'helpers'; }
 
 // ── numeric helpers shared by the parser ──────────────────────
 function _invNum_(s) {
@@ -1561,6 +1575,7 @@ function parseLogisticsInvoiceText(text) {
     var taxable = (tax !== null) ? (total - tax) : total;
     var cleanName = String(starts[b2].name || '').replace(/(\s+\d[\d,\.]{2,})+\s*$/, '').trim();
     items.push({
+      category: _invCategory_(cleanName),
       description: cleanName || ('Line ' + (items.length + 1)),
       taxable: Math.round(taxable * 100) / 100,
       vat: tax === null ? 0 : Math.round(tax * 100) / 100,
@@ -1765,7 +1780,8 @@ function saveLogisticsInvoice(payload) {
       return [id, payload.ym, supplier, invoiceNo, payload.invoiceDate || '',
               payload.currency || 'AED', String(it.description || '').trim(),
               net, vat || 0, tot, now, who, payload.fileUrl || '',
-              hdrNet, hdrVat, hdrTot];
+              hdrNet, hdrVat, hdrTot,
+              String(it.category || _invCategory_(it.description))];
     });
     var startRow = sh.getLastRow() + 1;
     sh.getRange(startRow, 2, rows.length, 1).setNumberFormat('@');
@@ -1850,7 +1866,9 @@ function getLogisticsInvoiceData() {
       }
       var inv = byId[id];
       var net = safeNum(all[r][7]), vat = safeNum(all[r][8]), tot = safeNum(all[r][9]);
-      inv.items.push({ description: String(all[r][6] || ''), taxable: net, vat: vat, total: tot });
+      var cat = String(all[r][16] || '').trim().toLowerCase();
+      if (!cat) cat = _invCategory_(all[r][6]);
+      inv.items.push({ description: String(all[r][6] || ''), taxable: net, vat: vat, total: tot, category: cat });
       inv.sumNet += net; inv.sumVat += vat; inv.sumTotal += tot;
     }
     var out = order.map(function(id){
