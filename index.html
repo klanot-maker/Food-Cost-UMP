@@ -1960,7 +1960,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-08-17.b';
+var UMP_BUILD_UI='2026-08-17.c';
 var UMP_BUILD_SERVER=null;
 // The five components, plus "other" for anything an invoice carries that fits
 // none of them. Other counts as variable: adjustments and one-off charges
@@ -2129,7 +2129,16 @@ function _showInvoiceDraft(d){
 
   var rawWrap=document.getElementById('lgcInvRawWrap');
   var rawBox=document.getElementById('lgcInvRaw');
-  if(d.rawText){ rawBox.value=d.rawText; rawWrap.style.display='block'; rawWrap.open=!(d.items&&d.items.length); }
+  var dg=document.getElementById('lgcInvDiag');
+  if(dg){
+    dg.innerHTML = d.diag
+      ? '<b>The reader found '+d.diag.headersFound+' item header'+(d.diag.headersFound===1?'':'s')
+        +' in '+d.diag.lines+' lines of text'
+        +(d.diag.headerNames&&d.diag.headerNames.length?' ('+d.diag.headerNames.join(', ')+')':'')+'.</b> '
+      : '';
+  }
+  if(d.rawText){ rawBox.value=d.rawText; rawWrap.style.display='block';
+    rawWrap.open=!(d.items&&d.items.length&&d.items.length>=3); }
   else { rawWrap.style.display='none'; }
 
   var tb=document.getElementById('lgcInvLines');
@@ -2157,6 +2166,17 @@ function _addInvLineRow(it){
   tb.appendChild(tr);
 }
 function addInvoiceLine(){ _addInvLineRow(null); _lgcInvRecalc(); }
+
+function _lgcCopyRaw(){
+  var ta=document.getElementById('lgcInvRaw');
+  var msg=document.getElementById('lgcCopyMsg');
+  try{
+    ta.select(); ta.setSelectionRange(0,ta.value.length);
+    var ok=document.execCommand('copy');
+    msg.textContent=ok?'copied':'select the box and copy manually';
+  }catch(e){ msg.textContent='select the box and copy manually'; }
+  setTimeout(function(){ msg.textContent=''; },4000);
+}
 
 function _lgcInvRecalc(){
   var net=0,vat=0,tot=0;
@@ -6092,7 +6112,13 @@ _lgReady();
         <div id="lgcInvSaveMsg" class="lgc-note" style="margin-top:10px;"></div>
         <details id="lgcInvRawWrap" style="margin-top:12px;display:none;">
           <summary style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--br);">Show the text read from the PDF</summary>
-          <div class="lgc-note" style="margin:6px 0;">If the line items came out wrong, copy this and send it over — the reader can be tuned to this supplier's layout.</div>
+          <div class="lgc-note" style="margin:6px 0;">
+            <span id="lgcInvDiag"></span>
+            If the line items came out wrong, click Copy and send the text over — that is the one thing
+            needed to fix the reader for this supplier's layout.
+            <button onclick="_lgcCopyRaw()" style="margin-left:8px;background:var(--br);color:#fff;border:none;border-radius:var(--rs);padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Lato',sans-serif;">Copy text</button>
+            <span id="lgcCopyMsg" style="margin-left:8px;font-weight:700;color:var(--brd);"></span>
+          </div>
           <textarea id="lgcInvRaw" readonly style="width:100%;height:190px;font-family:monospace;font-size:10.5px;border:1.5px solid var(--border);border-radius:var(--rs);padding:8px;color:var(--txt);background:#fff;"></textarea>
         </details>
       </div>

@@ -32,7 +32,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-08-17.b';
+var UMP_BUILD    = '2026-08-17.c';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 function _invalidateCache() {
@@ -1643,6 +1643,15 @@ function parseLogisticsInvoiceText(text) {
   sumTotal = Math.round(sumTotal * 100) / 100;
   sumTaxable = Math.round(sumTaxable * 100) / 100;
 
+  var biggest = 0;
+  items.forEach(function(it){ if (it.total > biggest) biggest = it.total; });
+  if (grandTotal && items.length && (items.length < 3 || biggest > grandTotal * 0.7)) {
+    warnings.push('The reader only recovered ' + items.length + ' line'
+      + (items.length === 1 ? '' : 's') + ' from this invoice'
+      + (biggest > grandTotal * 0.7 ? ', one of them holding most of the total' : '')
+      + '. The breakdown is unreliable — open "Show the text read from the PDF" below and send that text so '
+      + 'the reader can be fixed for this layout.');
+  }
   var bad = items.filter(function(it){ return it.taxable < 0; });
   if (bad.length) {
     warnings.push(bad.length + ' line' + (bad.length === 1 ? '' : 's') + ' came out with a negative net amount ('
@@ -1669,6 +1678,8 @@ function parseLogisticsInvoiceText(text) {
     supplier: supplier, invoiceNo: invoiceNo, invoiceDate: invoiceDate, ym: ym, currency: currency,
     items: items, subTotal: subTotal, vatTotal: vatTotal, grandTotal: grandTotal,
     sumTotal: sumTotal, sumTaxable: sumTaxable, warnings: warnings, readMode: readMode,
+    diag: { headersFound: starts.length, blocks: blocks.length, lines: lines.length,
+            headerNames: starts.map(function(x){ return x.name; }).slice(0, 12) },
     rawText: raw.length > 12000 ? raw.substring(0, 12000) + '\n… (truncated)' : raw
   };
 }
