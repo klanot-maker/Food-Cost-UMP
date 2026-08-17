@@ -1752,22 +1752,43 @@ function saveLogisticsInvoice(payload) {
   }
 }
 
-function _deleteInvoiceRows_(sh, id) {
+// Returns how many rows were removed so the caller can tell "deleted" from
+// "matched nothing" — the two used to be indistinguishable.
+function _deleteInvoiceRows_(sh, id, supplier, invoiceNo) {
   var all = sh.getDataRange().getValues();
+  var want = String(id == null ? '' : id).trim();
+  var wSup = String(supplier || '').trim().toLowerCase();
+  var wNo  = String(invoiceNo || '').trim().toLowerCase();
+  var removed = 0;
   for (var r = all.length - 1; r >= 1; r--) {
-    if (String(all[r][0]) === String(id)) sh.deleteRow(r + 1);
+    var rowId = String(all[r][0] == null ? '' : all[r][0]).trim();
+    var hit = (want !== '' && rowId === want);
+    // Fall back to supplier + invoice number so a row whose id no longer
+    // lines up can still be removed rather than being stuck on the page.
+    if (!hit && wNo !== '') {
+      hit = (String(all[r][3] || '').trim().toLowerCase() === wNo) &&
+            (wSup === '' || String(all[r][2] || '').trim().toLowerCase() === wSup);
+    }
+    if (hit) { sh.deleteRow(r + 1); removed++; }
   }
+  return removed;
 }
 
-function deleteLogisticsInvoice(id) {
+function deleteLogisticsInvoice(id, supplier, invoiceNo) {
   try {
     var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
     var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
-    if (!sh) return { ok: true };
-    _deleteInvoiceRows_(sh, id);
+    if (!sh) return { ok: false, removed: 0, error: 'The LOGISTICS INVOICES sheet was not found.' };
+    var removed = _deleteInvoiceRows_(sh, id, supplier, invoiceNo);
     _invalidateCache();
-    return { ok: true };
-  } catch (e) { return { ok: false, error: e.message }; }
+    if (!removed) {
+      return { ok: false, removed: 0,
+               error: 'Nothing matched that invoice in the sheet (id ' + id + ').' };
+    }
+    return { ok: true, removed: removed };
+  } catch (e) {
+    return { ok: false, removed: 0, error: e.message };
+  }
 }
 
 // Grouped back into invoices for the page.

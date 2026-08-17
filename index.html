@@ -1530,10 +1530,13 @@ function _lgcMonthLabel(ym){
 }
 
 // Brief, self-clearing confirmation above the month controls.
-function _lgcFlash(msg){
+function _lgcFlash(msg,isError){
   var el=document.getElementById('lgcFlash');
   if(!el) return;
   el.textContent=msg;
+  el.style.background=isError?'#FEF0F0':'var(--brl)';
+  el.style.borderColor=isError?'#D94040':'var(--br)';
+  el.style.color=isError?'#8A2020':'var(--brd)';
   el.style.display='block';
   clearTimeout(el._t);
   el._t=setTimeout(function(){ el.style.display='none'; },6000);
@@ -1873,7 +1876,6 @@ function _lgcRenderInvoiceList(ym,invs){
   var h='<table class="lgc-tbl"><thead><tr><th>Supplier</th><th>Invoice</th><th>Date</th>'
     +'<th class="num">Net</th><th class="num">VAT</th><th class="num">Total</th><th></th></tr></thead><tbody>';
   invs.forEach(function(v){
-    var lbl=(v.invoiceNo||'invoice')+' from '+(v.supplier||'supplier');
     h+='<tr><td>'+(v.supplier||'—')+'</td>'
       +'<td>'+(v.fileUrl?'<a href="'+v.fileUrl+'" target="_blank" style="color:var(--br);font-weight:700;">'+(v.invoiceNo||'PDF')+'</a>':(v.invoiceNo||'—'))+'</td>'
       +'<td style="color:var(--mut);">'+(v.invoiceDate||'—')+'</td>'
@@ -1881,7 +1883,7 @@ function _lgcRenderInvoiceList(ym,invs){
       +'<td class="num">'+_lgcMoney(v.vat)+'</td>'
       +'<td class="num">'+_lgcMoney(v.total)
       +(v.linesMismatch?'<div style="font-size:9px;font-weight:700;color:#C07A10;">lines don\u2019t reconcile</div>':'')+'</td>'
-      +'<td class="num"><button onclick="removeInvoice(\''+v.id+'\',\''+lbl.replace(/'/g,"")+'\')" '
+      +'<td class="num"><button onclick="removeInvoice(\''+String(v.id).replace(/'/g,"")+'\')" '
       +'title="Remove" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;">✕</button></td></tr>';
   });
   var tn=0,tv=0,tg=0; invs.forEach(function(v){tn+=v.net;tv+=v.vat;tg+=v.total;});
@@ -2140,12 +2142,32 @@ function saveInvoice(replace){
     .saveLogisticsInvoice(payload);
 }
 
-function removeInvoice(id,label){
+function removeInvoice(id){
+  var inv=null;
+  LGC_INVOICES.forEach(function(v){ if(String(v.id)===String(id)) inv=v; });
+  var label=inv?((inv.invoiceNo||'invoice')+' from '+(inv.supplier||'supplier')):'this invoice';
   if(!confirm('Remove '+label+'? The month will fall back to the estimated cost if no other invoice covers it.')) return;
+
+  // The server reports failure in the payload, not by throwing, so the
+  // result has to be inspected — treating every reply as success is what
+  // made a failed delete look like nothing happening at all.
   google.script.run
-    .withSuccessHandler(function(){ _lgcLoadInvoices(function(){ renderLogisticsCost(); }); })
-    .withFailureHandler(function(){ alert('Could not remove that invoice.'); })
-    .deleteLogisticsInvoice(id);
+    .withSuccessHandler(function(res){
+      if(!res||!res.ok){
+        _lgcFlash('Could not remove '+label+': '+((res&&res.error)||'the server gave no reason.'),true);
+        return;
+      }
+      _lgcLoadInvoices(function(){
+        renderLogisticsCost();
+        _lgcFlash('Removed '+label+' ('+res.removed+' line'+(res.removed===1?'':'s')+').');
+      });
+    })
+    .withFailureHandler(function(e){
+      _lgcFlash('Could not remove '+label+': '+((e&&e.message)?e.message:'the call to the server failed.')
+        +' If this persists, delete the rows for '+(inv&&inv.invoiceNo?inv.invoiceNo:'that invoice')
+        +' directly in the LOGISTICS INVOICES sheet.',true);
+    })
+    .deleteLogisticsInvoice(id, inv?inv.supplier:'', inv?inv.invoiceNo:'');
 }
 
 // ════════════════════════════════════════════════════════════
