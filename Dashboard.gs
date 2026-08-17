@@ -32,7 +32,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-08-17.d';
+var UMP_BUILD    = '2026-08-17.e';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 function _invalidateCache() {
@@ -1919,6 +1919,13 @@ function saveLogisticsInvoice(payload) {
 
     var supplier  = String(payload.supplier  || '').trim();
     var invoiceNo = String(payload.invoiceNo || '').trim();
+
+    // An edit or re-read names the rows it is replacing, so the old ones go
+    // even when the invoice number is blank or has changed.
+    if (payload.replaceId) {
+      try { _deleteInvoiceRows_(sh, payload.replaceId, supplier, invoiceNo); } catch (e) {}
+      all = sh.getDataRange().getValues();
+    }
 
     // Same supplier + invoice number already stored? Replace it rather than
     // silently double-counting the month.

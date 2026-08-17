@@ -1960,8 +1960,10 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-08-17.d';
+var UMP_BUILD_UI='2026-08-17.e';
 var UMP_BUILD_SERVER=null;
+var _lgcEditMode=false;
+var _lgcEditingId=null;
 // The five components, plus "other" for anything an invoice carries that fits
 // none of them. Other counts as variable: adjustments and one-off charges
 // behave like variable spend, not like the fixed fleet.
@@ -2008,6 +2010,7 @@ function _lgcInvoicesFor(ym){
 
 function openInvoiceModal(){
   _lgcInvFileB64=null; _lgcInvFileName=''; _lgcInvFileUrl=null;
+  _lgcEditMode=false; _lgcEditingId=null;
   document.getElementById('lgcInvStep1').style.display='';
   document.getElementById('lgcInvStep2').style.display='none';
   document.getElementById('lgcInvSaveBtn').style.display='none';
@@ -2238,7 +2241,8 @@ function _lgcCollectInvoice(replace){
     invoiceDate:document.getElementById('lgcInvDate').value.trim(),
     ym:document.getElementById('lgcInvYm').value,
     currency:document.getElementById('lgcInvCurrency').value.trim()||'AED',
-    items:items, fileUrl:_lgcInvFileUrl, replace:!!replace,
+    items:items, fileUrl:_lgcInvFileUrl,
+    replace:(!!replace)||_lgcEditMode, replaceId:_lgcEditMode?_lgcEditingId:null,
     invoiceNet:parseFloat(document.getElementById('lgcInvHdrNet').value),
     invoiceVat:parseFloat(document.getElementById('lgcInvHdrVat').value),
     invoiceTotal:parseFloat(document.getElementById('lgcInvHdrTotal').value)
@@ -2258,10 +2262,7 @@ function saveInvoice(replace){
   btn.disabled=true; btn.textContent='Saving…';
   google.script.run
     .withSuccessHandler(function(res){
-      btn.disabled=false; btn.textContent='Save invoice';
-      if(res&&res.duplicate&&document.getElementById('lgcInvSaveBtn').textContent==='Save changes'){
-        saveInvoice(true); return;
-      }
+      btn.disabled=false; btn.textContent=_lgcEditMode?'Save changes':'Save invoice';
       if(res&&res.duplicate){
         msg.innerHTML='<span style="color:#8A5A08;font-weight:700;">'+res.error+'</span> '
           +'<a href="#" onclick="saveInvoice(true);return false;" style="color:var(--br);font-weight:700;">Replace it</a>';
@@ -2308,6 +2309,7 @@ function editInvoice(id){
     ym:inv.ym, currency:inv.currency, items:inv.items,
     subTotal:inv.net, vatTotal:inv.vat, grandTotal:inv.total, warnings:warn
   });
+  _lgcEditMode=true; _lgcEditingId=inv.id;
   document.getElementById('lgcInvSaveBtn').textContent='Save changes';
 }
 
@@ -2390,6 +2392,7 @@ function rereadInvoice(id){
       _lgcInvFileUrl=inv.fileUrl;
       _showInvoiceDraft(draft);
       document.getElementById('lgcInvYm').value=inv.ym||draft.ym||'';
+      _lgcEditMode=true; _lgcEditingId=inv.id;
       document.getElementById('lgcInvSaveBtn').textContent='Save changes';
     })
     .withFailureHandler(function(e){
