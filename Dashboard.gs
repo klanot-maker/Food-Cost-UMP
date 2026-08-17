@@ -28,6 +28,7 @@ var _CACHE_STAFF = 'ump_staff_v1';
 // Bumped to v2: the ops payload now carries logistics cost fields, so any
 // payload cached under the old key has the wrong shape and must be dropped.
 var _CACHE_OPS   = 'ump_ops_v2';
+var _CACHE_INV   = 'ump_loginv_v1';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 function _invalidateCache() {
@@ -37,6 +38,7 @@ function _invalidateCache() {
     c.remove(_CACHE_FIN);
     c.remove(_CACHE_STAFF);
     c.remove(_CACHE_OPS);
+    c.remove(_CACHE_INV);
   } catch(e) {}
 }
 
@@ -1650,6 +1652,26 @@ function _ocrPdfToText_(blob, name) {
   return text;
 }
 
+// Converts a file already in Drive, so the PDF bytes cross the network once
+// instead of being uploaded again just to be read.
+function _ocrDriveFileToText_(fileId, name) {
+  var token = ScriptApp.getOAuthToken();
+  var res = UrlFetchApp.fetch(
+    'https://www.googleapis.com/drive/v3/files/' + fileId + '/copy?ocrLanguage=en',
+    { method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ name: 'ump-ocr-' + (name || 'invoice'),
+                                mimeType: 'application/vnd.google-apps.document' }),
+      headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+  if (res.getResponseCode() >= 300) {
+    throw new Error('Could not convert the PDF (Drive said ' + res.getResponseCode() + ').');
+  }
+  var docId = JSON.parse(res.getContentText()).id;
+  var text = '';
+  try { text = DocumentApp.openById(docId).getBody().getText(); }
+  finally { try { DriveApp.getFileById(docId).setTrashed(true); } catch (e) {} }
+  return text;
+}
+
 // Keeps the original PDFs together so a saved figure can be traced back.
 function _umpInvoiceFolder_() {
   var it = DriveApp.getFoldersByName('UMP Logistics Invoices');
@@ -1662,13 +1684,16 @@ function parseLogisticsInvoiceUpload(base64, filename) {
     var bytes = Utilities.base64Decode(base64);
     var blob  = Utilities.newBlob(bytes, 'application/pdf', filename || 'invoice.pdf');
 
-    var stored = null;
+    // File it once, then convert that copy in place. Falls back to sending the
+    // bytes again only if filing failed.
+    var stored = null, storedId = null;
     try {
       var f = _umpInvoiceFolder_().createFile(blob);
-      stored = f.getUrl();
+      stored = f.getUrl(); storedId = f.getId();
     } catch (e) { /* filing is a convenience; never block the parse on it */ }
 
-    var text  = _ocrPdfToText_(blob, filename);
+    var text = storedId ? _ocrDriveFileToText_(storedId, filename)
+                        : _ocrPdfToText_(blob, filename);
     var draft = parseLogisticsInvoiceText(text);
     draft.fileUrl = stored;
     draft.ok = true;
@@ -1793,6 +1818,11 @@ function deleteLogisticsInvoice(id, supplier, invoiceNo) {
 
 // Grouped back into invoices for the page.
 function getLogisticsInvoiceData() {
+  var cache = CacheService.getScriptCache();
+  try {
+    var hit = cache.get(_CACHE_INV);
+    if (hit) return JSON.parse(hit);
+  } catch (e) {}
   try {
     var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
     var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
@@ -1837,7 +1867,12 @@ function getLogisticsInvoiceData() {
       v.linesMismatch = (v.sumTotal > 0 && Math.abs(v.sumTotal - v.total) > 1);
       return v;
     });
-    return { invoices: out };
+    var payload = { invoices: out };
+    try {
+      var j = JSON.stringify(payload);
+      if (j.length <= 90000) cache.put(_CACHE_INV, j, _CACHE_TTL);
+    } catch (e) {}
+    return payload;
   } catch (e) { return { invoices: [], error: e.message }; }
 }
 

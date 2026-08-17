@@ -1502,8 +1502,8 @@ function showPage(id) {
   if(id==='logistics'){
     document.getElementById('dtLbl').textContent='Logistics Cost';
     _lgcInit();
-    renderLogisticsCost();
-    _lgcLoadInvoices(function(){ renderLogisticsCost(); });
+    renderLogisticsCost();                       // paint immediately
+    if(!_lgcInvLoaded) _lgcLoadInvoices(function(){ renderLogisticsCost(); });
   }
 }
 
@@ -1882,9 +1882,15 @@ function _lgcRenderInvoiceList(ym,invs){
       +'<td class="num">'+_lgcMoney(v.net)+'</td>'
       +'<td class="num">'+_lgcMoney(v.vat)+'</td>'
       +'<td class="num">'+_lgcMoney(v.total)
-      +(v.linesMismatch?'<div style="font-size:9px;font-weight:700;color:#C07A10;">lines don\u2019t reconcile</div>':'')+'</td>'
-      +'<td class="num"><button onclick="removeInvoice(\''+String(v.id).replace(/'/g,"")+'\')" '
-      +'title="Remove" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;">✕</button></td></tr>';
+      +(v.linesMismatch?'<div style="font-size:9px;font-weight:700;color:#C07A10;" '
+        +'title="The total above is the invoice\u2019s own figure and is what the cost uses. Only the itemised breakdown is incomplete.">'
+        +'total is correct \u00b7 breakdown incomplete</div>':'')+'</td>'
+      +'<td class="num" style="white-space:nowrap;">'
+      +'<button onclick="editInvoice(\''+String(v.id).replace(/'/g,"")+'\')" title="Edit line items" '
+      +'style="background:none;border:none;color:var(--br);cursor:pointer;font-size:13px;margin-right:6px;">✎</button>'
+      +'<button onclick="removeInvoice(\''+String(v.id).replace(/'/g,"")+'\')" title="Remove" '
+      +'style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;">✕</button>'
+      +'</td></tr>';
   });
   var tn=0,tv=0,tg=0; invs.forEach(function(v){tn+=v.net;tv+=v.vat;tg+=v.total;});
   h+='<tr class="tot"><td colspan="3">Total for the month</td><td class="num">'+_lgcMoney(tn)
@@ -1901,10 +1907,13 @@ function _lgcRenderInvoiceList(ym,invs){
 var LGC_INVOICES=[];
 var _lgcInvFileB64=null, _lgcInvFileName='', _lgcInvFileUrl=null;
 
-function _lgcLoadInvoices(cb){
+var _lgcInvLoaded=false;
+function _lgcLoadInvoices(cb,force){
+  if(_lgcInvLoaded&&!force){ if(cb) cb(); return; }
   google.script.run
     .withSuccessHandler(function(res){
       LGC_INVOICES=(res&&res.invoices)||[];
+      _lgcInvLoaded=true;
       if(cb) cb();
     })
     .withFailureHandler(function(){ LGC_INVOICES=[]; if(cb) cb(); })
@@ -1951,9 +1960,17 @@ function readInvoicePdf(){
   if(!_lgcInvFileB64) return;
   var btn=document.getElementById('lgcInvReadBtn');
   btn.disabled=true; btn.textContent='Reading…'; btn.style.opacity='.6';
-  document.getElementById('lgcInvUploadMsg').textContent='Converting and reading the PDF — this can take up to a minute.';
+  var msgEl=document.getElementById('lgcInvUploadMsg');
+  var t0=Date.now();
+  msgEl.textContent='Uploading…';
+  var tick=setInterval(function(){
+    var s2=Math.round((Date.now()-t0)/1000);
+    msgEl.textContent=(s2<6?'Uploading… ':'Converting and reading the PDF… ')+s2+'s';
+  },1000);
+  window.__lgcTick=tick;
   google.script.run
     .withSuccessHandler(function(draft){
+      clearInterval(window.__lgcTick);
       btn.disabled=false; btn.textContent='Read invoice'; btn.style.opacity='1';
       if(!draft||!draft.ok){
         document.getElementById('lgcInvUploadMsg').innerHTML=
@@ -1965,6 +1982,7 @@ function readInvoicePdf(){
       _showInvoiceDraft(draft);
     })
     .withFailureHandler(function(e){
+      clearInterval(window.__lgcTick);
       btn.disabled=false; btn.textContent='Read invoice'; btn.style.opacity='1';
       document.getElementById('lgcInvUploadMsg').innerHTML=
         '<span style="color:var(--red);font-weight:700;">'+(e&&e.message?e.message:'Upload failed.')+'</span>';
@@ -2116,6 +2134,9 @@ function saveInvoice(replace){
   google.script.run
     .withSuccessHandler(function(res){
       btn.disabled=false; btn.textContent='Save invoice';
+      if(res&&res.duplicate&&document.getElementById('lgcInvSaveBtn').textContent==='Save changes'){
+        saveInvoice(true); return;
+      }
       if(res&&res.duplicate){
         msg.innerHTML='<span style="color:#8A5A08;font-weight:700;">'+res.error+'</span> '
           +'<a href="#" onclick="saveInvoice(true);return false;" style="color:var(--br);font-weight:700;">Replace it</a>';
@@ -2133,13 +2154,36 @@ function saveInvoice(replace){
         _lgcInit();
         renderLogisticsCost();
         _lgcFlash('Invoice saved to '+_lgcMonthLabel(payload.ym)+'.');
-      });
+      },true);
     })
     .withFailureHandler(function(e){
       btn.disabled=false; btn.textContent='Save invoice';
       msg.innerHTML='<span style="color:var(--red);font-weight:700;">'+(e&&e.message?e.message:'Save failed.')+'</span>';
     })
     .saveLogisticsInvoice(payload);
+}
+
+// Reopens a saved invoice for correction. The reader gets line items wrong on
+// some layouts; rather than leaving that stuck in the sheet, the breakdown can
+// be put right by hand and saved back over the same invoice.
+function editInvoice(id){
+  var inv=null;
+  LGC_INVOICES.forEach(function(v){ if(String(v.id)===String(id)) inv=v; });
+  if(!inv){ _lgcFlash('That invoice is no longer loaded — refresh and try again.',true); return; }
+  openInvoiceModal();
+  _lgcInvFileUrl=inv.fileUrl||null;
+  var warn=[];
+  if(inv.linesMismatch){
+    warn.push('The saved line items add up to '+_lgcMoney(inv.sumTotal)+', but the invoice total is '
+      +_lgcMoney(inv.total)+'. The cost figure is already correct — correcting the lines here just '
+      +'completes the breakdown.');
+  }
+  _showInvoiceDraft({
+    supplier:inv.supplier, invoiceNo:inv.invoiceNo, invoiceDate:inv.invoiceDate,
+    ym:inv.ym, currency:inv.currency, items:inv.items,
+    subTotal:inv.net, vatTotal:inv.vat, grandTotal:inv.total, warnings:warn
+  });
+  document.getElementById('lgcInvSaveBtn').textContent='Save changes';
 }
 
 function removeInvoice(id){
@@ -2160,7 +2204,7 @@ function removeInvoice(id){
       _lgcLoadInvoices(function(){
         renderLogisticsCost();
         _lgcFlash('Removed '+label+' ('+res.removed+' line'+(res.removed===1?'':'s')+').');
-      });
+      },true);
     })
     .withFailureHandler(function(e){
       _lgcFlash('Could not remove '+label+': '+((e&&e.message)?e.message:'the call to the server failed.')
