@@ -1721,6 +1721,31 @@ function parseLogisticsInvoiceUpload(base64, filename) {
   }
 }
 
+// Re-reads an invoice from the PDF already filed in Drive. Rows saved by an
+// earlier version of the reader carry its mistakes; this re-parses them with
+// the current one without the PDF being uploaded again.
+function _driveIdFromUrl_(url) {
+  var m = String(url || '').match(/[-\w]{25,}/);
+  return m ? m[0] : '';
+}
+
+function reparseStoredInvoice(fileUrl) {
+  try {
+    var id = _driveIdFromUrl_(fileUrl);
+    if (!id) {
+      return { ok: false, warnings: [], items: [],
+               error: 'No stored PDF is linked to this invoice — add it again instead.' };
+    }
+    var text  = _ocrDriveFileToText_(id, 'reread');
+    var draft = parseLogisticsInvoiceText(text);
+    draft.fileUrl = fileUrl;
+    draft.ok = true;
+    return draft;
+  } catch (e) {
+    return { ok: false, warnings: [], items: [], error: e.message };
+  }
+}
+
 function saveLogisticsInvoice(payload) {
   try {
     if (!payload) throw new Error('Nothing to save.');

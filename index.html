@@ -1929,6 +1929,8 @@ function _lgcRenderInvoiceList(ym,invs){
         +'title="The total above is the invoice\u2019s own figure and is what the cost uses. Only the itemised breakdown is incomplete.">'
         +'total is correct \u00b7 breakdown incomplete</div>':'')+'</td>'
       +'<td class="num" style="white-space:nowrap;">'
+      +'<button onclick="rereadInvoice(\''+String(v.id).replace(/'/g,"")+'\')" title="Re-read from the stored PDF" '
+      +'style="background:none;border:none;color:var(--br);cursor:pointer;font-size:14px;margin-right:6px;">↻</button>'
       +'<button onclick="editInvoice(\''+String(v.id).replace(/'/g,"")+'\')" title="Edit line items" '
       +'style="background:none;border:none;color:var(--br);cursor:pointer;font-size:13px;margin-right:6px;">✎</button>'
       +'<button onclick="removeInvoice(\''+String(v.id).replace(/'/g,"")+'\')" title="Remove" '
@@ -2258,6 +2260,35 @@ function editInvoice(id){
     subTotal:inv.net, vatTotal:inv.vat, grandTotal:inv.total, warnings:warn
   });
   document.getElementById('lgcInvSaveBtn').textContent='Save changes';
+}
+
+// One click to re-parse a saved invoice from its stored PDF, so invoices
+// filed by an older reader can be corrected without being uploaded again.
+function rereadInvoice(id){
+  var inv=null;
+  LGC_INVOICES.forEach(function(v){ if(String(v.id)===String(id)) inv=v; });
+  if(!inv){ _lgcFlash('That invoice is no longer loaded — refresh and try again.',true); return; }
+  if(!inv.fileUrl){
+    _lgcFlash('No stored PDF is linked to '+(inv.invoiceNo||'that invoice')+' — use Add invoice to upload it again.',true);
+    return;
+  }
+  _lgcFlash('Re-reading '+(inv.invoiceNo||'invoice')+' from the stored PDF — this takes a few seconds…');
+  google.script.run
+    .withSuccessHandler(function(draft){
+      if(!draft||!draft.ok){
+        _lgcFlash('Could not re-read '+(inv.invoiceNo||'that invoice')+': '+((draft&&draft.error)||'no reason given.'),true);
+        return;
+      }
+      openInvoiceModal();
+      _lgcInvFileUrl=inv.fileUrl;
+      _showInvoiceDraft(draft);
+      document.getElementById('lgcInvYm').value=inv.ym||draft.ym||'';
+      document.getElementById('lgcInvSaveBtn').textContent='Save changes';
+    })
+    .withFailureHandler(function(e){
+      _lgcFlash('Could not re-read '+(inv.invoiceNo||'that invoice')+': '+((e&&e.message)?e.message:'the call failed.'),true);
+    })
+    .reparseStoredInvoice(inv.fileUrl);
 }
 
 function removeInvoice(id){
