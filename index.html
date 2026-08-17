@@ -2039,8 +2039,24 @@ function _lgcInvFilePicked(){
   rd.readAsDataURL(f);
 }
 
+// Refuses to read a PDF while the backend is out of step. The old reader
+// mis-assigns amounts to line descriptions, and letting it run just writes
+// more bad data into the sheet that has to be undone later.
+function _lgcBackendCurrent(){
+  return !!UMP_BUILD_SERVER && UMP_BUILD_SERVER===UMP_BUILD_UI;
+}
+
 function readInvoicePdf(){
   if(!_lgcInvFileB64) return;
+  if(!_lgcBackendCurrent()){
+    document.getElementById('lgcInvUploadMsg').innerHTML=
+      '<span style="color:var(--red);font-weight:700;">Dashboard.gs on the server is older than this page'
+      +(UMP_BUILD_SERVER?' (server '+UMP_BUILD_SERVER+', page '+UMP_BUILD_UI+')':'')+'.</span><br>'
+      +'Reading a PDF with the old code puts the wrong amounts against the wrong lines, so it is blocked. '
+      +'Paste the matching Dashboard.gs, then Deploy \u2192 Manage deployments \u2192 Edit \u2192 New version \u2192 Deploy. '
+      +'You can still <a href="#" onclick="startBlankInvoice();return false;" style="color:var(--br);font-weight:700;">enter it manually</a>.';
+    return;
+  }
   var btn=document.getElementById('lgcInvReadBtn');
   btn.disabled=true; btn.textContent='Reading…'; btn.style.opacity='.6';
   var msgEl=document.getElementById('lgcInvUploadMsg');
@@ -2296,6 +2312,11 @@ function _lgcCheckBuild(){
 
 // Re-reads every stored invoice, in batches, until none remain.
 function rereadAllInvoices(){
+  if(!_lgcBackendCurrent()){
+    _lgcFlash('Dashboard.gs on the server is older than this page, so re-reading would use the old reader. '
+      +'Paste the matching Dashboard.gs and deploy a new version first.',true);
+    return;
+  }
   if(!confirm('Re-read every saved invoice from its stored PDF using the current reader? '
     +'Existing line items will be replaced. Invoice totals are unaffected.')) return;
   var tally={updated:[],skipped:[],failed:[]};
@@ -2326,6 +2347,11 @@ function rereadAllInvoices(){
 }
 
 function rereadInvoice(id){
+  if(!_lgcBackendCurrent()){
+    _lgcFlash('Dashboard.gs on the server is older than this page, so re-reading would use the old reader. '
+      +'Paste the matching Dashboard.gs and deploy a new version first.',true);
+    return;
+  }
   var inv=null;
   LGC_INVOICES.forEach(function(v){ if(String(v.id)===String(id)) inv=v; });
   if(!inv){ _lgcFlash('That invoice is no longer loaded — refresh and try again.',true); return; }
