@@ -29,6 +29,10 @@ var _CACHE_STAFF = 'ump_staff_v1';
 // payload cached under the old key has the wrong shape and must be dropped.
 var _CACHE_OPS   = 'ump_ops_v2';
 var _CACHE_INV   = 'ump_loginv_v1';
+// Bumped whenever the invoice reader changes. The page shows it next to its
+// own copy, so a dashboard running an older deployment is obvious at a glance
+// instead of looking like a bug in the data.
+var UMP_BUILD    = '2026-08-17.b';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 function _invalidateCache() {
@@ -1509,81 +1513,8 @@ function parseLogisticsInvoiceText(text) {
   if (!invoiceDate) warnings.push('Invoice date could not be read — please pick it.');
 
   // ── Line items ──────────────────────────────────────────────
-  // Item headers are numbered 1, 2, 3 … and the number may sit on the same
-  // line as the description or on its own, depending on whether the
-  // converter preserved the invoice table. Requiring the next expected
-  // number rejects the hundreds of "11650 184.8" toll rows and description
-  // lines like "18 helpers- *1800" that otherwise look like item headers.
-  var starts = [], expected = 1;
-  for (var a = 0; a < lines.length; a++) {
-    var L = lines[a];
-    var inline = L.match(/^(\d{1,2})\s+([A-Za-z#].*)$/);
-    if (inline && parseInt(inline[1], 10) === expected) {
-      starts.push({ i: a, name: inline[2].trim() }); expected++; continue;
-    }
-    if (/^\d{1,2}$/.test(L) && parseInt(L, 10) === expected) {
-      for (var nx = a + 1; nx < Math.min(a + 4, lines.length); nx++) {
-        if (lines[nx] === '') continue;
-        if (/^[A-Za-z#]/.test(lines[nx])) { starts.push({ i: a, name: lines[nx].trim() }); expected++; }
-        break;
-      }
-    }
-  }
-
-  // Within each item block, read the figures by token order rather than by
-  // line position: the amount just before the tax-rate marker is the tax and
-  // the one just after it is the line total. That holds whether each figure
-  // is on its own line or several share one.
-  var TOKEN = /(\d{1,2}(?:\.\d{1,2})?\s*%)|(-?[\d,]*\d\.\d{1,2})/g;
-  var items = [];
-  for (var b2 = 0; b2 < starts.length; b2++) {
-    var from = starts[b2].i;
-    var to = (b2 + 1 < starts.length) ? starts[b2 + 1].i : lines.length;
-    var toks = [], m;
-    for (var li = from; li < to; li++) {
-      TOKEN.lastIndex = 0;
-      while ((m = TOKEN.exec(lines[li])) !== null) {
-        if (m[1]) toks.push({ pct: true });
-        else toks.push({ n: _invNum_(m[2]) });
-      }
-    }
-    var pctAt = -1;
-    for (var q = 0; q < toks.length; q++) { if (toks[q].pct) { pctAt = q; break; } }
-
-    var total = null, tax = null;
-    if (pctAt > -1) {
-      var before = [];
-      for (var p2 = pctAt - 1; p2 >= 0 && before.length < 3; p2--) { if (toks[p2].n !== undefined) before.push(toks[p2].n); }
-      for (var f2 = pctAt + 1; f2 < toks.length; f2++) { if (toks[f2].n !== undefined) { total = toks[f2].n; break; } }
-      tax = before.length ? before[0] : null;
-      // A line total can never be smaller than its own tax. When it is, the
-      // figure after the rate marker belongs to something else (typically the
-      // next row's quantity), so rebuild the line from the amounts before it.
-      if (total !== null && tax !== null && total < tax) {
-        var taxableGuess = before.length > 1 ? before[1] : null;
-        if (taxableGuess !== null && taxableGuess >= tax) { total = taxableGuess + tax; }
-        else if (taxableGuess !== null) { total = tax; tax = taxableGuess; }
-        else { total = tax; tax = 0; }
-      }
-    } else {
-      var nums = toks.filter(function(x){ return x.n !== undefined; }).map(function(x){ return x.n; });
-      if (nums.length >= 2) { total = nums[nums.length - 1]; tax = nums[nums.length - 2]; }
-      else if (nums.length === 1) { total = nums[0]; }
-    }
-    if (total === null) continue;
-
-    var taxable = (tax !== null) ? (total - tax) : total;
-    var cleanName = String(starts[b2].name || '').replace(/(\s+\d[\d,\.]{2,})+\s*$/, '').trim();
-    items.push({
-      category: _invCategory_(cleanName),
-      description: cleanName || ('Line ' + (items.length + 1)),
-      taxable: Math.round(taxable * 100) / 100,
-      vat: tax === null ? 0 : Math.round(tax * 100) / 100,
-      total: Math.round(total * 100) / 100
-    });
-  }
-
-  // ── Invoice totals ──────────────────────────────────────────
+  // The invoice's own totals are extracted first: they are the oracle the
+  // line reading is checked against.
   var subTotal = null, vatTotal = null, grandTotal = null;
   var mSub = raw.match(/Sub\s*Total\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})/i);
   if (mSub) { subTotal = _invNum_(mSub[1]); vatTotal = _invNum_(mSub[2]); grandTotal = _invNum_(mSub[3]); }
@@ -1596,6 +1527,116 @@ function parseLogisticsInvoiceText(text) {
     if (mBal) grandTotal = _invNum_(mBal[1]);
   }
   if (grandTotal === null && subTotal !== null && vatTotal !== null) grandTotal = subTotal + vatTotal;
+
+  // Item headers are numbered 1, 2, 3 … The number may share a line with the
+  // description or sit on its own, depending on whether the converter kept the
+  // invoice table. Requiring the next expected number rejects the hundreds of
+  // "11650 184.8" toll rows and lines like "18 helpers- *1800".
+  var starts = [], expected = 1;
+  for (var a = 0; a < lines.length; a++) {
+    var L2 = lines[a];
+    var inline = L2.match(/^(\d{1,2})\s+([A-Za-z#].*)$/);
+    if (inline && parseInt(inline[1], 10) === expected) {
+      starts.push({ i: a, name: inline[2].trim() }); expected++; continue;
+    }
+    if (/^\d{1,2}$/.test(L2) && parseInt(L2, 10) === expected) {
+      for (var nx = a + 1; nx < Math.min(a + 4, lines.length); nx++) {
+        if (lines[nx] === '') continue;
+        if (/^[A-Za-z#]/.test(lines[nx])) { starts.push({ i: a, name: lines[nx].trim() }); expected++; }
+        break;
+      }
+    }
+  }
+
+  // Each item's block, reduced to an ordered run of amounts and rate markers.
+  var TOKEN = /(\d{1,2}(?:\.\d{1,2})?\s*%)|(-?[\d,]*\d\.\d{1,2})/g;
+  // The last item ends where the invoice's summary begins. Without this the
+  // final block swallows Sub Total and Balance Due, and their figures get read
+  // as if they were that item's own.
+  // Searched only after the last item begins: these invoices print "Balance
+  // Due" in the header too, and anchoring on that would put the summary
+  // before every item and disable the bound entirely.
+  var summaryAt = lines.length;
+  var lastStart = starts.length ? starts[starts.length - 1].i : 0;
+  for (var sIdx = lastStart + 1; sIdx < lines.length; sIdx++) {
+    if (/^(sub\s*total|balance\s*due|tax\s*summary|total\s+AED)/i.test(lines[sIdx])) { summaryAt = sIdx; break; }
+  }
+  var blocks = [];
+  for (var b2 = 0; b2 < starts.length; b2++) {
+    var from = starts[b2].i;
+    var to = (b2 + 1 < starts.length) ? starts[b2 + 1].i : lines.length;
+    if (from < summaryAt && to > summaryAt) to = summaryAt;
+    var toks = [], m2;
+    for (var li = from; li < to; li++) {
+      TOKEN.lastIndex = 0;
+      while ((m2 = TOKEN.exec(lines[li])) !== null) {
+        if (m2[1]) toks.push({ pct: true });
+        else toks.push({ n: _invNum_(m2[2]) });
+      }
+    }
+    blocks.push({ name: String(starts[b2].name || '')
+                          .replace(/(\s+\d[\d,\.]{2,})+\s*$/, '')
+                          .replace(/\s+/g, ' ').trim(), toks: toks });
+  }
+
+  // Three ways of reading a block. Which one is right depends on how the
+  // converter laid the table out, so rather than assume, all three are tried
+  // and the one whose line totals reconcile with the invoice is kept.
+  function readBlock(bk, mode) {
+    var toks = bk.toks, nums = [], pctAt = -1, i2;
+    for (i2 = 0; i2 < toks.length; i2++) {
+      if (toks[i2].pct) { if (pctAt < 0) pctAt = nums.length; }
+      else nums.push(toks[i2].n);
+    }
+    if (!nums.length) return null;
+    var total = null, tax = null;
+    if (mode === 'afterRate') {
+      if (pctAt < 0 || pctAt >= nums.length) return null;
+      total = nums[pctAt];
+      tax = pctAt > 0 ? nums[pctAt - 1] : null;
+    } else if (mode === 'lastTwo') {
+      total = nums[nums.length - 1];
+      tax = nums.length > 1 ? nums[nums.length - 2] : null;
+    } else { // largest
+      var bi = 0;
+      for (i2 = 1; i2 < nums.length; i2++) if (nums[i2] > nums[bi]) bi = i2;
+      total = nums[bi];
+      tax = bi > 0 ? nums[bi - 1] : null;
+    }
+    if (total === null) return null;
+    if (tax !== null && total < tax) { var t3 = total; total = tax; tax = t3; }
+    var taxable = (tax !== null) ? (total - tax) : total;
+    return {
+      category: _invCategory_(bk.name),
+      description: bk.name || 'Line item',
+      taxable: Math.round(taxable * 100) / 100,
+      vat: tax === null ? 0 : Math.round(tax * 100) / 100,
+      total: Math.round(total * 100) / 100
+    };
+  }
+
+  var best = null;
+  ['afterRate', 'lastTwo', 'largest'].forEach(function(mode){
+    var its = [];
+    for (var k2 = 0; k2 < blocks.length; k2++) {
+      var it2 = readBlock(blocks[k2], mode);
+      if (it2) its.push(it2);
+    }
+    var sum2 = 0;
+    its.forEach(function(x){ sum2 += x.total; });
+    sum2 = Math.round(sum2 * 100) / 100;
+    var err = (grandTotal !== null) ? Math.abs(sum2 - grandTotal) : (its.length ? 0 : Infinity);
+    var cand = { mode: mode, items: its, sum: sum2, err: err, count: its.length,
+                 full: its.length >= blocks.length };
+    if (!best) { best = cand; return; }
+    // A reading that recovers every line beats one that merely adds up.
+    if (cand.full !== best.full) { if (cand.full) best = cand; return; }
+    if (cand.err < best.err - 0.005) best = cand;
+    else if (Math.abs(cand.err - best.err) <= 0.005 && cand.count > best.count) best = cand;
+  });
+
+  var items = best ? best.items : [];
+  var readMode = best ? best.mode : 'none';
 
   var sumTotal = 0, sumTaxable = 0;
   items.forEach(function(it){ sumTotal += it.total; sumTaxable += it.taxable; });
@@ -1627,7 +1668,7 @@ function parseLogisticsInvoiceText(text) {
   return {
     supplier: supplier, invoiceNo: invoiceNo, invoiceDate: invoiceDate, ym: ym, currency: currency,
     items: items, subTotal: subTotal, vatTotal: vatTotal, grandTotal: grandTotal,
-    sumTotal: sumTotal, sumTaxable: sumTaxable, warnings: warnings,
+    sumTotal: sumTotal, sumTaxable: sumTaxable, warnings: warnings, readMode: readMode,
     rawText: raw.length > 12000 ? raw.substring(0, 12000) + '\n… (truncated)' : raw
   };
 }
@@ -1727,6 +1768,61 @@ function parseLogisticsInvoiceUpload(base64, filename) {
 function _driveIdFromUrl_(url) {
   var m = String(url || '').match(/[-\w]{25,}/);
   return m ? m[0] : '';
+}
+
+// Re-reads every stored invoice that still has its PDF, a few at a time so a
+// run stays inside the Apps Script time limit. The caller repeats while
+// "remaining" is above zero.
+function reparseAllStoredInvoices(max) {
+  max = max || 3;
+  var res = { ok: true, build: UMP_BUILD, updated: [], skipped: [], failed: [], remaining: 0 };
+  try {
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
+    if (!sh) return { ok: false, error: 'No LOGISTICS INVOICES sheet found.' };
+
+    var all = sh.getDataRange().getValues();
+    var seen = {}, list = [];
+    for (var r = 1; r < all.length; r++) {
+      var id = String(all[r][0] || '');
+      if (!id || seen[id]) continue;
+      seen[id] = 1;
+      list.push({ id: id, ym: _normYm_(all[r][1]), supplier: String(all[r][2] || ''),
+                  invoiceNo: String(all[r][3] || ''), currency: String(all[r][5] || 'AED'),
+                  fileUrl: String(all[r][12] || '') });
+    }
+
+    var done = 0;
+    for (var i = 0; i < list.length; i++) {
+      var inv = list[i];
+      if (!inv.fileUrl) { res.skipped.push(inv.invoiceNo || inv.id); continue; }
+      if (done >= max) { res.remaining++; continue; }
+      try {
+        var d = reparseStoredInvoice(inv.fileUrl);
+        if (!d || !d.ok || !d.items || !d.items.length) {
+          res.failed.push((inv.invoiceNo || inv.id) + ': ' + ((d && d.error) || 'no line items recovered'));
+          done++; continue;
+        }
+        // Remove the old rows first so a blank invoice number cannot leave a
+        // duplicate behind.
+        _deleteInvoiceRows_(sh, inv.id, inv.supplier, inv.invoiceNo);
+        var sv = saveLogisticsInvoice({
+          ym: inv.ym || d.ym, supplier: d.supplier || inv.supplier,
+          invoiceNo: d.invoiceNo || inv.invoiceNo, invoiceDate: d.invoiceDate || '',
+          currency: d.currency || inv.currency, items: d.items, fileUrl: inv.fileUrl,
+          replace: true, invoiceNet: d.subTotal, invoiceVat: d.vatTotal, invoiceTotal: d.grandTotal
+        });
+        if (sv && sv.ok) res.updated.push((inv.invoiceNo || inv.id) + ' (' + d.items.length + ' lines)');
+        else res.failed.push((inv.invoiceNo || inv.id) + ': ' + ((sv && sv.error) || 'save failed'));
+        done++;
+      } catch (e) {
+        res.failed.push((inv.invoiceNo || inv.id) + ': ' + e.message);
+        done++;
+      }
+    }
+    _invalidateCache();
+    return res;
+  } catch (e) { return { ok: false, error: e.message }; }
 }
 
 function reparseStoredInvoice(fileUrl) {
@@ -1910,7 +2006,7 @@ function getLogisticsInvoiceData() {
       v.linesMismatch = (v.sumTotal > 0 && Math.abs(v.sumTotal - v.total) > 1);
       return v;
     });
-    var payload = { invoices: out };
+    var payload = { invoices: out, build: UMP_BUILD };
     try {
       var j = JSON.stringify(payload);
       if (j.length <= 90000) cache.put(_CACHE_INV, j, _CACHE_TTL);

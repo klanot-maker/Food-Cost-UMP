@@ -1357,6 +1357,8 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
     <!-- PAGE: LOGISTICS COST -->
     <div class="page" id="page-logistics">
 
+      <div id="lgcBuild" style="display:none;background:#FEF0F0;border:1.5px solid #D94040;color:#8A2020;border-radius:var(--rs);padding:9px 14px;margin-bottom:12px;font-size:12px;font-weight:700;"></div>
+
       <div id="lgcFlash" style="display:none;background:var(--brl);border:1.5px solid var(--br);color:var(--brd);border-radius:var(--rs);padding:9px 14px;margin-bottom:12px;font-size:12px;font-weight:700;"></div>
 
       <!-- Controls -->
@@ -1405,7 +1407,11 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
       <!-- Supplier invoices -->
       <div style="display:flex;align-items:center;justify-content:space-between;margin:22px 0 10px;">
         <div class="lgc-sec-title" style="margin:0;">📄 Supplier Invoices</div>
-        <button class="modal-save" style="padding:7px 16px;font-size:12px;" onclick="openInvoiceModal()">＋ Add invoice</button>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button onclick="rereadAllInvoices()" title="Re-read every stored invoice with the current reader"
+            style="background:none;border:1.5px solid var(--br);color:var(--br);border-radius:var(--rs);padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Lato',sans-serif;">↻ Re-read all</button>
+          <button class="modal-save" style="padding:7px 16px;font-size:12px;" onclick="openInvoiceModal()">＋ Add invoice</button>
+        </div>
       </div>
       <div class="lgc-card"><div id="lgcInvoiceList"></div></div>
 
@@ -1867,6 +1873,7 @@ function renderLogisticsCost(){
 
   _lgcRenderInvoiceList(ym,invs);
   _lgcRenderModelCheck();
+  _lgcCheckBuild();
 }
 
 // How well the five-component model tracked the months that have a real
@@ -1950,6 +1957,11 @@ function _lgcRenderInvoiceList(ym,invs){
 // read of a PDF should never become a silent cost figure.
 // ════════════════════════════════════════════════════════════
 var LGC_INVOICES=[];
+// Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
+// not deployed together, which looks exactly like bad data unless it is said
+// out loud.
+var UMP_BUILD_UI='2026-08-17.b';
+var UMP_BUILD_SERVER=null;
 // The five components, plus "other" for anything an invoice carries that fits
 // none of them. Other counts as variable: adjustments and one-off charges
 // behave like variable spend, not like the fixed fleet.
@@ -1983,6 +1995,7 @@ function _lgcLoadInvoices(cb,force){
   google.script.run
     .withSuccessHandler(function(res){
       LGC_INVOICES=(res&&res.invoices)||[];
+      UMP_BUILD_SERVER=(res&&res.build)||null;
       _lgcInvLoaded=true;
       if(cb) cb();
     })
@@ -2264,6 +2277,54 @@ function editInvoice(id){
 
 // One click to re-parse a saved invoice from its stored PDF, so invoices
 // filed by an older reader can be corrected without being uploaded again.
+// Shown only when the two files are out of step, because that is otherwise
+// indistinguishable from the reader being wrong.
+function _lgcCheckBuild(){
+  var el=document.getElementById('lgcBuild');
+  if(!el) return;
+  if(UMP_BUILD_SERVER&&UMP_BUILD_SERVER!==UMP_BUILD_UI){
+    el.textContent='This page is build '+UMP_BUILD_UI+' but the server is running build '
+      +UMP_BUILD_SERVER+'. Paste the matching Dashboard.gs and deploy a new version — '
+      +'until then the invoice figures come from the older reader.';
+    el.style.display='block';
+  } else if(!UMP_BUILD_SERVER&&_lgcInvLoaded){
+    el.textContent='The server did not report a build number, so Dashboard.gs is older than this page. '
+      +'Paste the matching Dashboard.gs and deploy a new version.';
+    el.style.display='block';
+  } else { el.style.display='none'; }
+}
+
+// Re-reads every stored invoice, in batches, until none remain.
+function rereadAllInvoices(){
+  if(!confirm('Re-read every saved invoice from its stored PDF using the current reader? '
+    +'Existing line items will be replaced. Invoice totals are unaffected.')) return;
+  var tally={updated:[],skipped:[],failed:[]};
+  var round=function(){
+    _lgcFlash('Re-reading invoices… '+tally.updated.length+' done so far. This takes a few seconds each.');
+    google.script.run
+      .withSuccessHandler(function(res){
+        if(!res||!res.ok){ _lgcFlash('Re-read failed: '+((res&&res.error)||'no reason given.'),true); return; }
+        tally.updated=tally.updated.concat(res.updated||[]);
+        tally.skipped=tally.skipped.concat(res.skipped||[]);
+        tally.failed=tally.failed.concat(res.failed||[]);
+        if(res.remaining>0){ round(); return; }
+        _lgcLoadInvoices(function(){
+          renderLogisticsCost();
+          var msg='Re-read '+tally.updated.length+' invoice'+(tally.updated.length===1?'':'s')+'.';
+          if(tally.skipped.length) msg+=' '+tally.skipped.length+' had no stored PDF ('+tally.skipped.join(', ')+') — re-upload those.';
+          if(tally.failed.length)  msg+=' Failed: '+tally.failed.join('; ');
+          _lgcFlash(msg,tally.failed.length>0);
+        },true);
+      })
+      .withFailureHandler(function(e){
+        _lgcFlash('Re-read failed: '+((e&&e.message)?e.message:'the call to the server failed.')
+          +' If this says the function is missing, Dashboard.gs has not been deployed.',true);
+      })
+      .reparseAllStoredInvoices(3);
+  };
+  round();
+}
+
 function rereadInvoice(id){
   var inv=null;
   LGC_INVOICES.forEach(function(v){ if(String(v.id)===String(id)) inv=v; });
