@@ -511,7 +511,10 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 .ddp-btn{display:flex;align-items:center;gap:7px;background:#fff;border:1.5px solid var(--border);border-radius:22px;padding:6px 14px;font-size:12.5px;font-weight:700;color:var(--txt);cursor:pointer;font-family:'Lato',sans-serif;transition:border-color .15s;}
 .ddp-btn:hover{border-color:var(--br);}
 .ddp-btn i{color:var(--br);font-size:14px;}
-.ddp-pop{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:400;background:#fff;border:1.5px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.14);padding:12px;width:262px;}
+/* Fixed, not absolute: .tbl-card clips its overflow to keep the rounded
+   corners, which cut the calendar off. A fixed popup is placed by _ddpPlace()
+   and escapes that clipping. */
+.ddp-pop{display:none;position:fixed;top:0;left:0;z-index:400;background:#fff;border:1.5px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.14);padding:12px;width:262px;}
 .ddp-pop.open{display:block;}
 .ddp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
 .ddp-title{font-size:13px;font-weight:800;color:var(--txt);}
@@ -1230,17 +1233,28 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
       <div class="cap-tbl-card" id="wowDistrictSection">
         <div class="tbl-hdr">
           <div class="tbl-title">District WoW % Performance</div>
-          <button class="cal-filter-btn dark" title="Filter by date" onclick="document.getElementById('wowFilterRow').style.display=document.getElementById('wowFilterRow').style.display==='none'?'flex':'none'">📅</button>
         </div>
-        <div class="cap-filter-row cap-filter-collapse" id="wowFilterRow">
-          <span class="filter-label">Week range:</span>
-          <div class="cap-filter-pill">
-            <input type="date" id="wowFrom">
-            <span class="pill-sep">→</span>
-            <input type="date" id="wowTo">
-            <button class="pill-apply" onclick="applyWowFilter()">Apply</button>
+        <div class="cap-filter-row" id="wowFilterRow" style="display:flex;">
+          <div class="ddp-wrap" id="ddpWrap_wow">
+            <button class="ddp-btn" id="ddpBtn_wow" onclick="_ddpToggle('wow',event)">
+              <i class="ti ti-calendar"></i><span id="ddpLabel_wow">All dates</span>
+            </button>
+            <div class="ddp-pop" id="ddpPop_wow" onclick="event.stopPropagation()">
+              <div class="ddp-head">
+                <button class="ddp-nav" onclick="_ddpMove('wow',-1)">‹</button>
+                <span class="ddp-title" id="ddpTitle_wow">—</span>
+                <button class="ddp-nav" onclick="_ddpMove('wow',1)">›</button>
+              </div>
+              <div class="ddp-sel" id="ddpSel_wow">Pick a start date</div>
+              <div class="ddp-dow" id="ddpDow_wow"></div>
+              <div class="ddp-grid" id="ddpGrid_wow"></div>
+              <div class="ddp-foot">
+                <button class="ddp-all" onclick="_ddpAll('wow')">All dates</button>
+                <button class="ddp-apply" onclick="_ddpApply('wow')">Apply</button>
+              </div>
+            </div>
           </div>
-          <button class="cap-filter-btn" onclick="clearWowFilter()">All</button>
+          <input type="hidden" id="wowFrom"><input type="hidden" id="wowTo">
         </div>
         <div style="position:relative;height:340px;padding:4px 0 8px;">
           <canvas id="wowDistrictChart"></canvas>
@@ -1258,22 +1272,22 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
           </div>
         </div>
         <div class="cap-filter-row" id="distFilterRow" style="display:flex;">
-          <div class="ddp-wrap">
-            <button class="ddp-btn" id="ddpBtn" onclick="_ddpToggle(event)">
-              <i class="ti ti-calendar"></i><span id="ddpLabel">All dates</span>
+          <div class="ddp-wrap" id="ddpWrap_dist">
+            <button class="ddp-btn" id="ddpBtn_dist" onclick="_ddpToggle('dist',event)">
+              <i class="ti ti-calendar"></i><span id="ddpLabel_dist">All dates</span>
             </button>
-            <div class="ddp-pop" id="ddpPop" onclick="event.stopPropagation()">
+            <div class="ddp-pop" id="ddpPop_dist" onclick="event.stopPropagation()">
               <div class="ddp-head">
-                <button class="ddp-nav" onclick="_ddpMove(-1)">‹</button>
-                <span class="ddp-title" id="ddpTitle">—</span>
-                <button class="ddp-nav" onclick="_ddpMove(1)">›</button>
+                <button class="ddp-nav" onclick="_ddpMove('dist',-1)">‹</button>
+                <span class="ddp-title" id="ddpTitle_dist">—</span>
+                <button class="ddp-nav" onclick="_ddpMove('dist',1)">›</button>
               </div>
-              <div class="ddp-sel" id="ddpSel">Pick a start date</div>
-              <div class="ddp-dow"></div>
-              <div class="ddp-grid" id="ddpGrid"></div>
+              <div class="ddp-sel" id="ddpSel_dist">Pick a start date</div>
+              <div class="ddp-dow" id="ddpDow_dist"></div>
+              <div class="ddp-grid" id="ddpGrid_dist"></div>
               <div class="ddp-foot">
-                <button class="ddp-all" onclick="_ddpAll()">All dates</button>
-                <button class="ddp-apply" onclick="_ddpApply()">Apply</button>
+                <button class="ddp-all" onclick="_ddpAll('dist')">All dates</button>
+                <button class="ddp-apply" onclick="_ddpApply('dist')">Apply</button>
               </div>
             </div>
           </div>
@@ -1965,7 +1979,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-08-19.a';
+var UMP_BUILD_UI='2026-08-19.b';
 var UMP_BUILD_SERVER=null;
 var _lgcEditMode=false;
 var _lgcEditingId=null;
@@ -4186,121 +4200,162 @@ function clearLogFilter(){
   renderLogistics(DATA.logistics||{rows:[]});
 }
 // ── WoW District filter ──────────────────────────────────────
-function applyWowFilter(){
-  var f=document.getElementById('wowFrom').value, t=document.getElementById('wowTo').value;
-  _wowFilter={from:f||null,to:t||null};
-  renderWowDistrict(DATA.wowDistrict||{headers:[],rows:[]});
-}
-function clearWowFilter(){
-  _wowFilter={from:null,to:null};
-  document.getElementById('wowFrom').value='';
-  document.getElementById('wowTo').value='';
-  renderWowDistrict(DATA.wowDistrict||{headers:[],rows:[]});
-}
-// ── District Deliveries filter ───────────────────────────────
-// ── District date-range picker ─────────────────────────────
+// ── Date-range picker ──────────────────────────────
 // One button showing the active range, opening a month calendar. Replaces the
-// pair of raw date inputs, which took three interactions to set a range.
-var _ddp={yr:null,mo:null,from:null,to:null,open:false};
+// pairs of raw date inputs, which took three interactions to set a range.
+// Two instances live on the Capacity page ('dist' and 'wow'), so every function
+// takes the instance key and reads its own elements, suffixed with that key.
+var _DDP={};
 
+function _ddpInit(key,cfg){
+  cfg.yr=null; cfg.mo=null; cfg.from=null; cfg.to=null; cfg.open=false;
+  _DDP[key]=cfg;
+}
+function _ddpEl(key,part){ return document.getElementById('ddp'+part+'_'+key); }
 function _ddpIso(y,m,d){ return y+'-'+_p2(m+1)+'-'+_p2(d); }
 function _ddpFmt(iso){
   if(!iso) return '';
   var p=iso.split('-');
   return parseInt(p[2],10)+' '+MO_SHT[parseInt(p[1],10)-1]+' '+p[0];
 }
-function _ddpSyncLabel(){
-  var el=document.getElementById('ddpLabel');
-  if(!el) return;
-  var f=_distFilter.from, t=_distFilter.to;
+function _ddpSyncLabel(key){
+  if(key===undefined){ for(var k in _DDP) _ddpSyncLabel(k); return; }
+  var c=_DDP[key]; if(!c) return;
+  var el=_ddpEl(key,'Label'); if(!el) return;
+  var cur=c.read()||{}, f=cur.from, t=cur.to;
   el.textContent=(!f&&!t)?'All dates'
-    :(f&&t)?(_ddpFmt(f)+' – '+_ddpFmt(t))
+    :(f&&t)?(_ddpFmt(f)+' \u2013 '+_ddpFmt(t))
     :(f?('From '+_ddpFmt(f)):('Until '+_ddpFmt(t)));
 }
-function _ddpToggle(ev){
+function _ddpToggle(key,ev){
   if(ev) ev.stopPropagation();
-  var pop=document.getElementById('ddpPop');
-  if(!pop) return;
-  _ddp.open=!pop.classList.contains('open');
-  if(_ddp.open){
-    _ddp.from=_distFilter.from||null;
-    _ddp.to=_distFilter.to||null;
-    var seed=_ddp.from||_todayStr();
-    _ddp.yr=parseInt(seed.substring(0,4),10);
-    _ddp.mo=parseInt(seed.substring(5,7),10)-1;
-    _ddpRender();
+  var c=_DDP[key], pop=_ddpEl(key,'Pop');
+  if(!c||!pop) return;
+  for(var k in _DDP){ if(k!==key) _ddpClose(k); }   // only one open at a time
+  c.open=!pop.classList.contains('open');
+  if(c.open){
+    var cur=c.read()||{};
+    c.from=cur.from||null;
+    c.to=cur.to||null;
+    var seed=c.from||_todayStr();
+    c.yr=parseInt(seed.substring(0,4),10);
+    c.mo=parseInt(seed.substring(5,7),10)-1;
     pop.classList.add('open');
+    _ddpRender(key);          // measurable only once it is displayed
   } else pop.classList.remove('open');
 }
-function _ddpClose(){
-  var pop=document.getElementById('ddpPop');
+function _ddpClose(key){
+  var c=_DDP[key], pop=_ddpEl(key,'Pop');
   if(pop) pop.classList.remove('open');
-  _ddp.open=false;
+  if(c) c.open=false;
 }
+// The popup is fixed, so it has to be told where its button is. Re-run this
+// whenever its height can change (a month with six week-rows is taller) or
+// anything moves underneath it.
+function _ddpPlace(key){
+  if(key===undefined||typeof key!=='string'){ for(var k in _DDP) _ddpPlace(k); return; }
+  var pop=_ddpEl(key,'Pop'), btn=_ddpEl(key,'Btn');
+  if(!pop||!btn||!pop.classList.contains('open')) return;
+  var b=btn.getBoundingClientRect(), p=pop.getBoundingClientRect();
+  var gap=6, pad=8;
+  var top=b.bottom+gap;
+  if(top+p.height>window.innerHeight-pad){
+    var above=b.top-p.height-gap;
+    top=(above>=pad)?above:Math.max(pad,window.innerHeight-pad-p.height);
+  }
+  var left=Math.min(b.left,window.innerWidth-pad-p.width);
+  pop.style.top=Math.round(top)+'px';
+  pop.style.left=Math.round(Math.max(pad,left))+'px';
+}
+window.addEventListener('resize',function(){_ddpPlace();});
+window.addEventListener('scroll',function(){_ddpPlace();},true);
 document.addEventListener('click',function(e){
-  if(!_ddp.open) return;
   // Picking a day redraws the grid, so the button that was clicked is already
   // detached by the time this runs. Testing contains() on it would say "outside"
   // and shut the picker on the user's own click — ignore anything unrooted.
   if(!e.target||!document.contains(e.target)) return;
-  var w=document.querySelector('.ddp-wrap');
-  if(w&&!w.contains(e.target)) _ddpClose();
+  for(var k in _DDP){
+    if(!_DDP[k].open) continue;
+    var w=document.getElementById('ddpWrap_'+k);
+    if(w&&!w.contains(e.target)) _ddpClose(k);
+  }
 });
-function _ddpMove(step){
-  _ddp.mo+=step;
-  if(_ddp.mo<0){_ddp.mo=11;_ddp.yr--;}
-  if(_ddp.mo>11){_ddp.mo=0;_ddp.yr++;}
-  _ddpRender();
+function _ddpMove(key,step){
+  var c=_DDP[key]; if(!c) return;
+  c.mo+=step;
+  if(c.mo<0){c.mo=11;c.yr--;}
+  if(c.mo>11){c.mo=0;c.yr++;}
+  _ddpRender(key);
 }
-function _ddpPick(iso){
+function _ddpPick(key,iso){
   // First click sets the start; the next completes the range, swapping if the
   // second date is earlier so the order picked does not matter.
-  if(!_ddp.from||(_ddp.from&&_ddp.to)){ _ddp.from=iso; _ddp.to=null; }
-  else if(iso<_ddp.from){ _ddp.to=_ddp.from; _ddp.from=iso; }
-  else _ddp.to=iso;
-  _ddpRender();
+  var c=_DDP[key]; if(!c) return;
+  if(!c.from||(c.from&&c.to)){ c.from=iso; c.to=null; }
+  else if(iso<c.from){ c.to=c.from; c.from=iso; }
+  else c.to=iso;
+  _ddpRender(key);
 }
-function _ddpRender(){
-  var t=document.getElementById('ddpTitle');
-  if(t) t.textContent=MO_LNG[_ddp.mo]+' '+_ddp.yr;
-  var dow=document.querySelector('.ddp-dow');
+function _ddpRender(key){
+  var c=_DDP[key]; if(!c) return;
+  var t=_ddpEl(key,'Title');
+  if(t) t.textContent=MO_LNG[c.mo]+' '+c.yr;
+  var dow=_ddpEl(key,'Dow');
   if(dow&&!dow.innerHTML) dow.innerHTML=DN.map(function(d){return '<div>'+d.substring(0,1)+'</div>';}).join('');
-  var sel=document.getElementById('ddpSel');
-  if(sel) sel.textContent=!_ddp.from?'Pick a start date'
-    :(!_ddp.to?(_ddpFmt(_ddp.from)+' → pick an end date'):(_ddpFmt(_ddp.from)+' – '+_ddpFmt(_ddp.to)));
+  var sel=_ddpEl(key,'Sel');
+  if(sel) sel.textContent=!c.from?'Pick a start date'
+    :(!c.to?(_ddpFmt(c.from)+' \u2192 pick an end date'):(_ddpFmt(c.from)+' \u2013 '+_ddpFmt(c.to)));
 
-  var first=new Date(_ddp.yr,_ddp.mo,1);
+  var first=new Date(c.yr,c.mo,1);
   var lead=(first.getDay()+6)%7;               // weeks start Monday
-  var days=new Date(_ddp.yr,_ddp.mo+1,0).getDate();
+  var days=new Date(c.yr,c.mo+1,0).getDate();
   var h='';
   for(var i=0;i<lead;i++) h+='<button class="ddp-day mut" disabled></button>';
   for(var d=1;d<=days;d++){
-    var iso=_ddpIso(_ddp.yr,_ddp.mo,d);
+    var iso=_ddpIso(c.yr,c.mo,d);
     var cls='ddp-day';
-    if(_ddp.from&&iso===_ddp.from) cls+=' edge';
-    else if(_ddp.to&&iso===_ddp.to) cls+=' edge';
-    else if(_ddp.from&&_ddp.to&&iso>_ddp.from&&iso<_ddp.to) cls+=' mid';
-    h+='<button class="'+cls+'" onclick="_ddpPick(\''+iso+'\')">'+d+'</button>';
+    if(c.from&&iso===c.from) cls+=' edge';
+    else if(c.to&&iso===c.to) cls+=' edge';
+    else if(c.from&&c.to&&iso>c.from&&iso<c.to) cls+=' mid';
+    h+='<button class="'+cls+'" onclick="_ddpPick(\''+key+'\',\''+iso+'\')">'+d+'</button>';
   }
-  var g=document.getElementById('ddpGrid');
+  var g=_ddpEl(key,'Grid');
   if(g) g.innerHTML=h;
+  _ddpPlace(key);
 }
-function _ddpApply(){
-  if(_ddp.from&&!_ddp.to) _ddp.to=_ddp.from;   // a single day is a valid range
-  _distFilter={from:_ddp.from||null,to:_ddp.to||null};
-  var f=document.getElementById('distFrom'), t=document.getElementById('distTo');
-  if(f) f.value=_ddp.from||''; if(t) t.value=_ddp.to||'';
-  _ddpClose(); _ddpSyncLabel();
-  renderDistrictDeliveries(DATA.districtDel||{headers:[],rows:[]});
+function _ddpApply(key){
+  var c=_DDP[key]; if(!c) return;
+  if(c.from&&!c.to) c.to=c.from;   // a single day is a valid range
+  _ddpClose(key);
+  c.write(c.from||null,c.to||null);
+  _ddpSyncLabel(key);
 }
-function _ddpAll(){
-  _ddp.from=null; _ddp.to=null;
-  _distFilter={from:null,to:null};
-  var f=document.getElementById('distFrom'), t=document.getElementById('distTo');
-  if(f) f.value=''; if(t) t.value='';
-  _ddpClose(); _ddpSyncLabel();
-  renderDistrictDeliveries(DATA.districtDel||{headers:[],rows:[]});
+function _ddpAll(key){
+  var c=_DDP[key]; if(!c) return;
+  c.from=null; c.to=null;
+  _ddpClose(key);
+  c.write(null,null);
+  _ddpSyncLabel(key);
 }
+
+_ddpInit('dist',{
+  read:function(){ return _distFilter; },
+  write:function(f,t){
+    _distFilter={from:f,to:t};
+    var a=document.getElementById('distFrom'), b=document.getElementById('distTo');
+    if(a) a.value=f||''; if(b) b.value=t||'';
+    renderDistrictDeliveries(DATA.districtDel||{headers:[],rows:[]});
+  }
+});
+_ddpInit('wow',{
+  read:function(){ return _wowFilter; },
+  write:function(f,t){
+    _wowFilter={from:f,to:t};
+    var a=document.getElementById('wowFrom'), b=document.getElementById('wowTo');
+    if(a) a.value=f||''; if(b) b.value=t||'';
+    renderWowDistrict(DATA.wowDistrict||{headers:[],rows:[]});
+  }
+});
 
 function applyDistFilter(){
   var f=document.getElementById('distFrom').value, t=document.getElementById('distTo').value;
@@ -4562,7 +4617,7 @@ function renderDistrictDeliveries(distData){
   });
   var sorted=filtered.slice().sort(function(a,b){return b.dateStr.localeCompare(a.dateStr);});
   var badge=document.getElementById('districtDelivBadge');
-  if(badge)badge.textContent=sorted.length+' rows';
+  if(badge)badge.textContent=sorted.length+(sorted.length===1?' row':' rows');
   _ddpSyncLabel();
   bEl.innerHTML=sorted.map(function(r){
     var ds10=String(r.dateStr).substring(0,10);
