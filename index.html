@@ -1262,7 +1262,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
             <button class="ddp-btn" id="ddpBtn" onclick="_ddpToggle(event)">
               <i class="ti ti-calendar"></i><span id="ddpLabel">All dates</span>
             </button>
-            <div class="ddp-pop" id="ddpPop">
+            <div class="ddp-pop" id="ddpPop" onclick="event.stopPropagation()">
               <div class="ddp-head">
                 <button class="ddp-nav" onclick="_ddpMove(-1)">‹</button>
                 <span class="ddp-title" id="ddpTitle">—</span>
@@ -1965,7 +1965,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-08-18.c';
+var UMP_BUILD_UI='2026-08-19.a';
 var UMP_BUILD_SERVER=null;
 var _lgcEditMode=false;
 var _lgcEditingId=null;
@@ -4239,6 +4239,10 @@ function _ddpClose(){
 }
 document.addEventListener('click',function(e){
   if(!_ddp.open) return;
+  // Picking a day redraws the grid, so the button that was clicked is already
+  // detached by the time this runs. Testing contains() on it would say "outside"
+  // and shut the picker on the user's own click — ignore anything unrooted.
+  if(!e.target||!document.contains(e.target)) return;
   var w=document.querySelector('.ddp-wrap');
   if(w&&!w.contains(e.target)) _ddpClose();
 });
