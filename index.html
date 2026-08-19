@@ -506,6 +506,32 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 .ops-dept-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:8px 8px 0 0;}
 .ops-dept-name{font-size:10px;font-weight:700;color:var(--lt);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;}
 .ops-dept-total{font-size:36px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-bottom:10px;}
+/* ── District date-range picker ── */
+.ddp-wrap{position:relative;display:inline-block;}
+.ddp-btn{display:flex;align-items:center;gap:7px;background:#fff;border:1.5px solid var(--border);border-radius:22px;padding:6px 14px;font-size:12.5px;font-weight:700;color:var(--txt);cursor:pointer;font-family:'Lato',sans-serif;transition:border-color .15s;}
+.ddp-btn:hover{border-color:var(--br);}
+.ddp-btn i{color:var(--br);font-size:14px;}
+.ddp-pop{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:400;background:#fff;border:1.5px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.14);padding:12px;width:262px;}
+.ddp-pop.open{display:block;}
+.ddp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+.ddp-title{font-size:13px;font-weight:800;color:var(--txt);}
+.ddp-nav{background:none;border:none;font-size:17px;color:var(--mut);cursor:pointer;padding:0 8px;line-height:1;}
+.ddp-nav:hover{color:var(--br);}
+.ddp-sel{font-size:11px;font-weight:700;color:var(--brd);background:var(--brl);border-radius:6px;padding:5px 8px;margin-bottom:8px;text-align:center;}
+.ddp-dow,.ddp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}
+.ddp-dow div{font-size:9px;font-weight:700;color:var(--mut);text-align:center;padding:3px 0;text-transform:uppercase;}
+.ddp-day{border:none;background:none;font-size:12px;font-family:'Lato',sans-serif;color:var(--txt);padding:6px 0;border-radius:6px;cursor:pointer;}
+.ddp-day:hover{background:var(--brl);}
+.ddp-day.mut{color:var(--lt);cursor:default;}
+.ddp-day.mut:hover{background:none;}
+.ddp-day.edge{background:var(--br);color:#fff;font-weight:800;}
+.ddp-day.mid{background:var(--brl);color:var(--brd);}
+.ddp-foot{display:flex;gap:8px;margin-top:10px;}
+.ddp-all{flex:1;background:none;border:1.5px solid var(--border);border-radius:var(--rs);padding:7px;font-size:12px;font-weight:700;color:var(--mut);cursor:pointer;font-family:'Lato',sans-serif;}
+.ddp-all:hover{border-color:var(--br);color:var(--br);}
+.ddp-apply{flex:1;background:var(--br);border:none;border-radius:var(--rs);padding:7px;font-size:12px;font-weight:700;color:#fff;cursor:pointer;font-family:'Lato',sans-serif;}
+.ddp-apply:hover{background:var(--brd);}
+
 /* ── District shift editor ── */
 .ds-group{border:1.5px solid var(--border);border-radius:var(--rs);padding:10px 12px;margin-bottom:10px;background:var(--card);}
 .ds-group-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
@@ -1170,34 +1196,6 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
         </div>
       </div>
 
-      <!-- ── WEEKLY CAPACITY TABLE ── -->
-      <div class="cap-tbl-card">
-        <div class="tbl-hdr" style="flex-wrap:wrap;gap:8px;">
-          <div>
-            <div class="tbl-title">Weekly Delivery Capacity — All Weeks</div>
-            <div style="font-size:10px;color:var(--mut);margin-top:2px;">CAPACITY sheet · Target · Current Avg · Gap · Fulfilled % · WoW</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span class="tbl-badge" id="capTblBadge">Latest 2 weeks</span>
-            <button class="cal-filter-btn dark" title="Filter by date" onclick="document.getElementById('capWkFilterRow').style.display=document.getElementById('capWkFilterRow').style.display==='none'?'flex':'none'">📅</button>
-          </div>
-        </div>
-        <div class="cap-filter-row cap-filter-collapse" id="capWkFilterRow">
-          <span class="filter-label">Weeks:</span>
-          <div class="cap-filter-pill">
-            <input type="date" id="capWkFrom">
-            <span class="pill-sep">→</span>
-            <input type="date" id="capWkTo">
-            <button class="pill-apply" onclick="applyCapWeekFilter()">Apply</button>
-          </div>
-          <button class="cap-filter-btn" onclick="clearCapWeekFilter()">All</button>
-        </div>
-        <table class="dtbl">
-          <thead><tr><th>Week Range</th><th>Target DPD</th><th>Current Avg</th><th>Gap to Fill</th><th>Cap Fulfilled %</th><th>DPD WoW</th><th>WoW %</th></tr></thead>
-          <tbody id="capWeekBody"></tbody>
-        </table>
-        <div class="tbl-foot"><span class="ftot" id="capWeekTot">—</span><span class="fcnt" id="capWeekCnt">—</span></div>
-      </div>
 
       <!-- ── ACTUAL DELIVERIES LOG ── -->
       <div class="tbl-card">
@@ -1226,30 +1224,6 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
         <div class="tbl-foot"><span class="ftot" id="capActualTot">—</span><span class="fcnt">Logged actual deliveries</span></div>
       </div>
 
-      <!-- ── FLEET LOGISTICS ── -->
-      <div class="cap-section-hdr"><div class="cap-section-hdr-lbl">Fleet &amp; Logistics</div><div class="cap-section-hdr-line"></div></div>
-      <div class="cap-tbl-card" id="logisticsSection">
-        <div class="tbl-hdr">
-          <div class="tbl-title">Weekly Vehicle Count</div>
-          <button class="cal-filter-btn dark" title="Filter by date" onclick="document.getElementById('logFilterRow').style.display=document.getElementById('logFilterRow').style.display==='none'?'flex':'none'">📅</button>
-        </div>
-        <div class="cap-filter-row cap-filter-collapse" id="logFilterRow">
-          <span class="filter-label">Week range:</span>
-          <div class="cap-filter-pill">
-            <input type="date" id="logFrom">
-            <span class="pill-sep">→</span>
-            <input type="date" id="logTo">
-            <button class="pill-apply" onclick="applyLogFilter()">Apply</button>
-          </div>
-          <button class="cap-filter-btn" onclick="clearLogFilter()">All</button>
-        </div>
-        <div style="overflow-x:auto;">
-          <table class="dtbl" id="logisticsChartTable">
-            <thead><tr><th>Week</th><th>Chiller Vans</th><th></th><th>3-Ton Trucks</th><th></th><th>Cafe Vans</th><th></th><th>Total Fleet</th></tr></thead>
-            <tbody id="logisticsBody"></tbody>
-          </table>
-        </div>
-      </div>
 
       <!-- ── WOW DISTRICT SUMMARY ── -->
       <div class="cap-section-hdr"><div class="cap-section-hdr-lbl">District Performance</div><div class="cap-section-hdr-line"></div></div>
@@ -1281,18 +1255,29 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
           <div class="tbl-title">Daily Deliveries by District</div>
           <div style="display:flex;align-items:center;gap:8px;">
             <span class="tbl-badge" id="districtDelivBadge">—</span>
-            <button class="cal-filter-btn dark" title="Filter by date" onclick="document.getElementById('distFilterRow').style.display=document.getElementById('distFilterRow').style.display==='none'?'flex':'none'">📅</button>
           </div>
         </div>
-        <div class="cap-filter-row cap-filter-collapse" id="distFilterRow">
-          <span class="filter-label">Date range:</span>
-          <div class="cap-filter-pill">
-            <input type="date" id="distFrom">
-            <span class="pill-sep">→</span>
-            <input type="date" id="distTo">
-            <button class="pill-apply" onclick="applyDistFilter()">Apply</button>
+        <div class="cap-filter-row" id="distFilterRow" style="display:flex;">
+          <div class="ddp-wrap">
+            <button class="ddp-btn" id="ddpBtn" onclick="_ddpToggle(event)">
+              <i class="ti ti-calendar"></i><span id="ddpLabel">All dates</span>
+            </button>
+            <div class="ddp-pop" id="ddpPop">
+              <div class="ddp-head">
+                <button class="ddp-nav" onclick="_ddpMove(-1)">‹</button>
+                <span class="ddp-title" id="ddpTitle">—</span>
+                <button class="ddp-nav" onclick="_ddpMove(1)">›</button>
+              </div>
+              <div class="ddp-sel" id="ddpSel">Pick a start date</div>
+              <div class="ddp-dow"></div>
+              <div class="ddp-grid" id="ddpGrid"></div>
+              <div class="ddp-foot">
+                <button class="ddp-all" onclick="_ddpAll()">All dates</button>
+                <button class="ddp-apply" onclick="_ddpApply()">Apply</button>
+              </div>
+            </div>
           </div>
-          <button class="cap-filter-btn" onclick="clearDistFilter()">All</button>
+          <input type="hidden" id="distFrom"><input type="hidden" id="distTo">
         </div>
         <div style="overflow-x:auto;">
           <table class="dtbl">
@@ -1980,7 +1965,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-08-18.b';
+var UMP_BUILD_UI='2026-08-18.c';
 var UMP_BUILD_SERVER=null;
 var _lgcEditMode=false;
 var _lgcEditingId=null;
@@ -4056,14 +4041,16 @@ function renderCapacity(capData, delivData){
   // Table: show 2 most recent by default; show all when a filter is active
   var noFilter=!(_capWeekFilter.from||_capWeekFilter.to);
   var tableWeeklyRows=noFilter?filtWeeklyRows.slice(-2):filtWeeklyRows;
-  document.getElementById('capTblBadge').textContent=noFilter?'Latest 2 weeks':tableWeeklyRows.length+' weeks';
+  var _capBadge=document.getElementById('capTblBadge');
+  if(_capBadge) _capBadge.textContent=noFilter?'Latest 2 weeks':tableWeeklyRows.length+' weeks';
 
   // Sync actuals date inputs to current filter state (pre-fill current month on first render)
   var cfF=document.getElementById('cfFrom'), cfT=document.getElementById('cfTo');
   if(!cfF.value&&_capActualsFilter.from) cfF.value=_capActualsFilter.from;
   if(!cfT.value&&_capActualsFilter.to)   cfT.value=_capActualsFilter.to;
 
-  document.getElementById('capWeekBody').innerHTML=tableWeeklyRows.map(function(wr){
+  var _capWeekBody=document.getElementById('capWeekBody');
+  if(_capWeekBody) _capWeekBody.innerHTML=tableWeeklyRows.map(function(wr){
     var pct=wr.capPct||0;
     var pctCls=pct>=90?'var(--br)':pct>=70?'var(--amb)':'var(--red)';
     var isThis=thisWeekRow&&wr.week===thisWeekRow.week;
@@ -4086,8 +4073,8 @@ function renderCapacity(capData, delivData){
   var totTarget=tableWeeklyRows.reduce(function(s,w){return s+(w.target||0);},0);
   var avgCapPct=tableWeeklyRows.filter(function(w){return w.capPct>0;});
   var avgPct=avgCapPct.length?avgCapPct.reduce(function(s,w){return s+w.capPct;},0)/avgCapPct.length:0;
-  document.getElementById('capWeekTot').textContent='Total target: '+totTarget.toLocaleString()+(avgPct>0?' · Avg fulfilled: '+avgPct.toFixed(1)+'%':'');
-  document.getElementById('capWeekCnt').textContent=tableWeeklyRows.length+' weeks'+(noFilter?' (latest)':'');
+  var _g_capWeekTot=document.getElementById('capWeekTot'); if(_g_capWeekTot) _g_capWeekTot.textContent='Total target: '+totTarget.toLocaleString()+(avgPct>0?' · Avg fulfilled: '+avgPct.toFixed(1)+'%':'');
+  var _g_capWeekCnt=document.getElementById('capWeekCnt'); if(_g_capWeekCnt) _g_capWeekCnt.textContent=tableWeeklyRows.length+' weeks'+(noFilter?' (latest)':'');
 
   // ── ACTUAL DELIVERIES LOG with filter ────────────────────────
   _renderActualsLog(records, fcstByDate, recCount);
@@ -4169,29 +4156,33 @@ function clearActualsDateFilter(){
 }
 
 function applyCapWeekFilter(){
-  var fv=document.getElementById('capWkFrom').value;
-  var tv=document.getElementById('capWkTo').value;
+  var fvEl=document.getElementById('capWkFrom'), tvEl=document.getElementById('capWkTo');
+  if(!fvEl||!tvEl) return;
+  var fv=fvEl.value;
+  var tv=tvEl.value;
   _capWeekFilter={from:fv||null,to:tv||null};
   renderCapacity(DATA.capacity,DATA.deliveries);
 }
 
 function clearCapWeekFilter(){
   _capWeekFilter={from:null,to:null};
-  document.getElementById('capWkFrom').value='';
-  document.getElementById('capWkTo').value='';
+  var wf0=document.getElementById('capWkFrom'), wt0=document.getElementById('capWkTo');
+  if(wf0) wf0.value=''; if(wt0) wt0.value='';
   renderCapacity(DATA.capacity,DATA.deliveries);
 }
 
 // ── Logistics filter ─────────────────────────────────────────
 function applyLogFilter(){
-  var f=document.getElementById('logFrom').value, t=document.getElementById('logTo').value;
+  var lfEl=document.getElementById('logFrom'), ltEl=document.getElementById('logTo');
+  if(!lfEl||!ltEl) return;
+  var f=lfEl.value, t=ltEl.value;
   _logFilter={from:f||null,to:t||null};
   renderLogistics(DATA.logistics||{rows:[]});
 }
 function clearLogFilter(){
   _logFilter={from:null,to:null};
-  document.getElementById('logFrom').value='';
-  document.getElementById('logTo').value='';
+  var lf0=document.getElementById('logFrom'), lt0=document.getElementById('logTo');
+  if(lf0) lf0.value=''; if(lt0) lt0.value='';
   renderLogistics(DATA.logistics||{rows:[]});
 }
 // ── WoW District filter ──────────────────────────────────────
@@ -4207,6 +4198,106 @@ function clearWowFilter(){
   renderWowDistrict(DATA.wowDistrict||{headers:[],rows:[]});
 }
 // ── District Deliveries filter ───────────────────────────────
+// ── District date-range picker ─────────────────────────────
+// One button showing the active range, opening a month calendar. Replaces the
+// pair of raw date inputs, which took three interactions to set a range.
+var _ddp={yr:null,mo:null,from:null,to:null,open:false};
+
+function _ddpIso(y,m,d){ return y+'-'+_p2(m+1)+'-'+_p2(d); }
+function _ddpFmt(iso){
+  if(!iso) return '';
+  var p=iso.split('-');
+  return parseInt(p[2],10)+' '+MO_SHT[parseInt(p[1],10)-1]+' '+p[0];
+}
+function _ddpSyncLabel(){
+  var el=document.getElementById('ddpLabel');
+  if(!el) return;
+  var f=_distFilter.from, t=_distFilter.to;
+  el.textContent=(!f&&!t)?'All dates'
+    :(f&&t)?(_ddpFmt(f)+' – '+_ddpFmt(t))
+    :(f?('From '+_ddpFmt(f)):('Until '+_ddpFmt(t)));
+}
+function _ddpToggle(ev){
+  if(ev) ev.stopPropagation();
+  var pop=document.getElementById('ddpPop');
+  if(!pop) return;
+  _ddp.open=!pop.classList.contains('open');
+  if(_ddp.open){
+    _ddp.from=_distFilter.from||null;
+    _ddp.to=_distFilter.to||null;
+    var seed=_ddp.from||_todayStr();
+    _ddp.yr=parseInt(seed.substring(0,4),10);
+    _ddp.mo=parseInt(seed.substring(5,7),10)-1;
+    _ddpRender();
+    pop.classList.add('open');
+  } else pop.classList.remove('open');
+}
+function _ddpClose(){
+  var pop=document.getElementById('ddpPop');
+  if(pop) pop.classList.remove('open');
+  _ddp.open=false;
+}
+document.addEventListener('click',function(e){
+  if(!_ddp.open) return;
+  var w=document.querySelector('.ddp-wrap');
+  if(w&&!w.contains(e.target)) _ddpClose();
+});
+function _ddpMove(step){
+  _ddp.mo+=step;
+  if(_ddp.mo<0){_ddp.mo=11;_ddp.yr--;}
+  if(_ddp.mo>11){_ddp.mo=0;_ddp.yr++;}
+  _ddpRender();
+}
+function _ddpPick(iso){
+  // First click sets the start; the next completes the range, swapping if the
+  // second date is earlier so the order picked does not matter.
+  if(!_ddp.from||(_ddp.from&&_ddp.to)){ _ddp.from=iso; _ddp.to=null; }
+  else if(iso<_ddp.from){ _ddp.to=_ddp.from; _ddp.from=iso; }
+  else _ddp.to=iso;
+  _ddpRender();
+}
+function _ddpRender(){
+  var t=document.getElementById('ddpTitle');
+  if(t) t.textContent=MO_LNG[_ddp.mo]+' '+_ddp.yr;
+  var dow=document.querySelector('.ddp-dow');
+  if(dow&&!dow.innerHTML) dow.innerHTML=DN.map(function(d){return '<div>'+d.substring(0,1)+'</div>';}).join('');
+  var sel=document.getElementById('ddpSel');
+  if(sel) sel.textContent=!_ddp.from?'Pick a start date'
+    :(!_ddp.to?(_ddpFmt(_ddp.from)+' → pick an end date'):(_ddpFmt(_ddp.from)+' – '+_ddpFmt(_ddp.to)));
+
+  var first=new Date(_ddp.yr,_ddp.mo,1);
+  var lead=(first.getDay()+6)%7;               // weeks start Monday
+  var days=new Date(_ddp.yr,_ddp.mo+1,0).getDate();
+  var h='';
+  for(var i=0;i<lead;i++) h+='<button class="ddp-day mut" disabled></button>';
+  for(var d=1;d<=days;d++){
+    var iso=_ddpIso(_ddp.yr,_ddp.mo,d);
+    var cls='ddp-day';
+    if(_ddp.from&&iso===_ddp.from) cls+=' edge';
+    else if(_ddp.to&&iso===_ddp.to) cls+=' edge';
+    else if(_ddp.from&&_ddp.to&&iso>_ddp.from&&iso<_ddp.to) cls+=' mid';
+    h+='<button class="'+cls+'" onclick="_ddpPick(\''+iso+'\')">'+d+'</button>';
+  }
+  var g=document.getElementById('ddpGrid');
+  if(g) g.innerHTML=h;
+}
+function _ddpApply(){
+  if(_ddp.from&&!_ddp.to) _ddp.to=_ddp.from;   // a single day is a valid range
+  _distFilter={from:_ddp.from||null,to:_ddp.to||null};
+  var f=document.getElementById('distFrom'), t=document.getElementById('distTo');
+  if(f) f.value=_ddp.from||''; if(t) t.value=_ddp.to||'';
+  _ddpClose(); _ddpSyncLabel();
+  renderDistrictDeliveries(DATA.districtDel||{headers:[],rows:[]});
+}
+function _ddpAll(){
+  _ddp.from=null; _ddp.to=null;
+  _distFilter={from:null,to:null};
+  var f=document.getElementById('distFrom'), t=document.getElementById('distTo');
+  if(f) f.value=''; if(t) t.value='';
+  _ddpClose(); _ddpSyncLabel();
+  renderDistrictDeliveries(DATA.districtDel||{headers:[],rows:[]});
+}
+
 function applyDistFilter(){
   var f=document.getElementById('distFrom').value, t=document.getElementById('distTo').value;
   _distFilter={from:f||null,to:t||null};
@@ -4468,6 +4559,7 @@ function renderDistrictDeliveries(distData){
   var sorted=filtered.slice().sort(function(a,b){return b.dateStr.localeCompare(a.dateStr);});
   var badge=document.getElementById('districtDelivBadge');
   if(badge)badge.textContent=sorted.length+' rows';
+  _ddpSyncLabel();
   bEl.innerHTML=sorted.map(function(r){
     var ds10=String(r.dateStr).substring(0,10);
     var rec=_dsRecord(ds10);

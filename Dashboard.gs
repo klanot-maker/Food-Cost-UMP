@@ -32,7 +32,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-08-18.b';
+var UMP_BUILD    = '2026-08-18.c';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 function _invalidateCache() {
