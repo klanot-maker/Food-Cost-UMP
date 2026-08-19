@@ -1980,7 +1980,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-08-18.a';
+var UMP_BUILD_UI='2026-08-18.b';
 var UMP_BUILD_SERVER=null;
 var _lgcEditMode=false;
 var _lgcEditingId=null;
@@ -4574,7 +4574,7 @@ function _applyCapTargetLocally(weekStr,newTarget){
 var _editDistrictData = null;
 
 function _dsKey(s){ return String(s==null?'':s).trim().replace(/\s+/g,' ').toLowerCase(); }
-var DS_SHIFTS=['Early Morning','Morning','Evening'];
+var DS_SHIFTS=['Evening','Morning','Early Morning'];
 
 function _dsDistricts(){
   var hdrs=((DATA.districtDel||{}).headers)||[];
@@ -4603,17 +4603,15 @@ function openEditDistrictRow(sheetRow, dateStr){
 
   var html='';
   districts.forEach(function(d,di){
-    // The existing district figure seeds Morning when no shift split exists
-    // yet, so a day already entered is not silently zeroed on first save.
+    // Whatever is on the sheet is shown as-is; nothing is pre-filled into a
+    // shift, so saving records exactly what was typed.
     var existing=0;
     for(var k=0;k<hdrs.length;k++){ if(_dsKey(hdrs[k])===_dsKey(d)){ existing=rowData.values[k]||0; break; } }
-    var seeded=false, vals=[];
-    DS_SHIFTS.forEach(function(sn){
+    var vals=DS_SHIFTS.map(function(sn){
       var v=rec&&rec.values?rec.values[_dsKey(d+' '+sn)]:undefined;
-      vals.push(v===undefined?null:v);
+      return (v===undefined||v===null)?0:v;
     });
-    var anyShift=vals.some(function(v){ return v!==null&&v>0; });
-    if(!anyShift&&existing>0){ vals=[0,existing,0]; seeded=true; }
+    var anyShift=vals.some(function(v){ return v>0; });
 
     html+='<div class="ds-group">'
       +'<div class="ds-group-hd">'
@@ -4623,10 +4621,11 @@ function openEditDistrictRow(sheetRow, dateStr){
     DS_SHIFTS.forEach(function(sn,si){
       html+='<div class="ds-row"><label>'+sn+'</label>'
         +'<input type="number" min="0" class="ds-input" id="dsh_'+di+'_'+si+'" '
-        +'data-di="'+di+'" value="'+(vals[si]===null?0:vals[si])+'" oninput="_dsRecalc('+di+')"></div>';
+        +'data-di="'+di+'" value="'+vals[si]+'" oninput="_dsRecalc('+di+')"></div>';
     });
-    if(seeded) html+='<div class="ds-note">No shift split recorded yet — the existing '
-      +existing.toLocaleString()+' has been placed under Morning. Adjust as needed.</div>';
+    if(!anyShift&&existing>0) html+='<div class="ds-note">Currently '
+      +existing.toLocaleString()+' on DISTRICT DELIVERIES with no shift split recorded. '
+      +'Enter the split — the district total is rewritten from what you type.</div>';
     html+='</div>';
   });
 
@@ -4716,6 +4715,12 @@ function saveEditDistrict(){
       if(!res||!res.ok){
         if(msg) msg.innerHTML='<span style="color:var(--red);font-weight:700;">'
           +((res&&res.error)||'Save failed.')+'</span>';
+        return;
+      }
+      if(res.unmatchedCount){
+        if(msg) msg.innerHTML='<span style="color:#8A5A08;font-weight:700;">Saved, but '+res.unmatchedCount
+          +' column(s) were not found in the DISTRICT SHIFTS sheet ('+(res.unmatched||[]).join(', ')
+          +'…). Those figures were not written — check the header names.</span>';
         return;
       }
       closeEditDistrict();

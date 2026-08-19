@@ -32,7 +32,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-08-18.a';
+var UMP_BUILD    = '2026-08-18.b';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 function _invalidateCache() {
@@ -2179,9 +2179,13 @@ function updateCapacityTarget(weekStr, newTarget) {
 // rewritten from the shift totals whenever a day is saved.
 // ════════════════════════════════════════════════════════════
 var SHEET_DISTRICT_SHIFTS = 'DISTRICT SHIFTS';
-var DISTRICT_SHIFT_NAMES  = ['Early Morning', 'Morning', 'Evening'];
+var DISTRICT_SHIFT_NAMES  = ['Evening', 'Morning', 'Early Morning'];
 
 function _shiftKey_(s) { return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toLowerCase(); }
+function _isShiftWord_(s) {
+  var k = _shiftKey_(s);
+  return k === 'evening' || k === 'morning' || k === 'early morning';
+}
 
 // Districts are whatever DISTRICT DELIVERIES lists, minus its Total column,
 // so the two sheets cannot drift apart.
@@ -2190,50 +2194,66 @@ function _districtNames_(ss) {
   return (d.headers || []).filter(function(h){ return h.toLowerCase().indexOf('total') === -1; });
 }
 
-function _ensureDistrictShiftSheet_(ss, districts) {
-  var sh = ss.getSheetByName(SHEET_DISTRICT_SHIFTS);
-  var wanted = ['Date'];
-  districts.forEach(function(d){
-    DISTRICT_SHIFT_NAMES.forEach(function(sn){ wanted.push(d + ' ' + sn); });
-  });
-  wanted.push('Notes');
+// Reads whatever header shape the sheet already uses rather than imposing one.
+// The sheet in use carries the district on row 1 and the shift on row 2, with
+// data from row 3; a single header row is also accepted.
+function _dsLayout_(sh) {
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var top = sh.getRange(1, 1, Math.min(2, Math.max(sh.getLastRow(), 1)), lastCol).getValues();
+  var row1 = top[0] || [];
+  var row2 = top.length > 1 ? top[1] : [];
 
-  if (!sh) {
-    sh = ss.insertSheet(SHEET_DISTRICT_SHIFTS);
-    sh.getRange(1, 1, 1, wanted.length).setValues([wanted]);
-    sh.getRange(1, 1, 1, wanted.length).setFontWeight('bold');
-    sh.setFrozenRows(1);
-    sh.setFrozenColumns(1);
-  } else {
-    // A district added later needs its three columns; existing ones stay put.
-    var have = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0]
-                 .map(function(h){ return _shiftKey_(h); });
-    var missing = wanted.filter(function(w){ return have.indexOf(_shiftKey_(w)) === -1; });
-    if (missing.length) {
-      var at = sh.getLastColumn() + 1;
-      sh.getRange(1, at, 1, missing.length).setValues([missing]);
-      sh.getRange(1, at, 1, missing.length).setFontWeight('bold');
+  var twoRow = false;
+  for (var c = 1; c < lastCol; c++) { if (_isShiftWord_(row2[c])) { twoRow = true; break; } }
+
+  var colOf = {}, notesCol = -1;
+  // A merged district cell reports its value only in the first column of the
+  // merge, so the last district seen carries forward across its shifts.
+  var carry = '';
+  for (var c2 = 1; c2 < lastCol; c2++) {   // column A is the date
+    var a = String(row1[c2] == null ? '' : row1[c2]).trim();
+    var b = twoRow ? String(row2[c2] == null ? '' : row2[c2]).trim() : '';
+    if (a) carry = a;
+    var combined = twoRow ? (_shiftKey_(carry) + ' ' + _shiftKey_(b)).trim() : _shiftKey_(a);
+    if (!combined) continue;
+    if (combined.indexOf('note') > -1 || combined.indexOf('remark') > -1 || combined.indexOf('comment') > -1) {
+      if (notesCol === -1) notesCol = c2;
+      continue;
     }
+    if (colOf[combined] === undefined) colOf[combined] = c2;
   }
-  try { sh.getRange('A:A').setNumberFormat('@'); } catch (e) {}
-  return sh;
+  return { twoRow: twoRow, dataStart: twoRow ? 3 : 2, colOf: colOf, notesCol: notesCol, lastCol: lastCol };
 }
 
-function _shiftColumnMap_(sh) {
-  var hdr = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0];
-  var map = {};
-  for (var c = 0; c < hdr.length; c++) {
-    var k = _shiftKey_(hdr[c]);
-    if (k) map[k] = c;
-  }
-  return map;
+function _ensureDistrictShiftSheet_(ss, districts) {
+  var sh = ss.getSheetByName(SHEET_DISTRICT_SHIFTS);
+  if (sh) return sh;               // an existing sheet is used exactly as it stands
+  sh = ss.insertSheet(SHEET_DISTRICT_SHIFTS);
+  var r1 = ['Date'], r2 = [''];
+  districts.forEach(function(d){
+    DISTRICT_SHIFT_NAMES.forEach(function(sn, i){ r1.push(i === 0 ? d : ''); r2.push(sn); });
+  });
+  r1.push('Notes'); r2.push('');
+  sh.getRange(1, 1, 1, r1.length).setValues([r1]).setFontWeight('bold');
+  sh.getRange(2, 1, 1, r2.length).setValues([r2]).setFontWeight('bold');
+  sh.setFrozenRows(2);
+  sh.setFrozenColumns(1);
+  return sh;
 }
 
 function _normDateStr_(v) {
   if (v instanceof Date && !isNaN(v.getTime())) {
     return v.getFullYear() + '-' + pad2(v.getMonth() + 1) + '-' + pad2(v.getDate());
   }
-  return String(v == null ? '' : v).trim().substring(0, 10);
+  var t = String(v == null ? '' : v).trim();
+  if (!t) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.substring(0, 10);
+  // M/D/YYYY as the sheet displays it
+  var m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return m[3] + '-' + pad2(parseInt(m[1], 10)) + '-' + pad2(parseInt(m[2], 10));
+  var d = new Date(t);
+  if (!isNaN(d.getTime())) return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  return t.substring(0, 10);
 }
 
 function getDistrictShiftData(ss) {
@@ -2241,78 +2261,87 @@ function getDistrictShiftData(ss) {
     ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
     var sh = ss.getSheetByName(SHEET_DISTRICT_SHIFTS);
     if (!sh) return { byDate: {}, shifts: DISTRICT_SHIFT_NAMES };
+    var lay = _dsLayout_(sh);
     var all = sh.getDataRange().getValues();
-    if (all.length < 2) return { byDate: {}, shifts: DISTRICT_SHIFT_NAMES };
-
-    var hdr = (all[0] || []).map(function(h){ return String(h || '').trim(); });
-    var notesAt = -1;
-    for (var c = 0; c < hdr.length; c++) if (_shiftKey_(hdr[c]) === 'notes') { notesAt = c; break; }
+    if (all.length < lay.dataStart) return { byDate: {}, shifts: DISTRICT_SHIFT_NAMES, layout: lay.twoRow ? 'two-row' : 'single-row' };
 
     var byDate = {};
-    for (var r = 1; r < all.length; r++) {
+    for (var r = lay.dataStart - 1; r < all.length; r++) {
       var ds = _normDateStr_(all[r][0]);
       if (!ds) continue;
-      var rec = { values: {}, notes: notesAt > -1 ? String(all[r][notesAt] || '') : '', sheetRow: r + 1 };
-      for (var c2 = 1; c2 < hdr.length; c2++) {
-        if (c2 === notesAt || !hdr[c2]) continue;
-        rec.values[_shiftKey_(hdr[c2])] = safeNum(all[r][c2]);
+      var rec = { values: {}, notes: lay.notesCol > -1 ? String(all[r][lay.notesCol] || '') : '', sheetRow: r + 1 };
+      for (var key in lay.colOf) {
+        if (!lay.colOf.hasOwnProperty(key)) continue;
+        rec.values[key] = safeNum(all[r][lay.colOf[key]]);
       }
       byDate[ds] = rec;
     }
-    return { byDate: byDate, shifts: DISTRICT_SHIFT_NAMES };
+    return { byDate: byDate, shifts: DISTRICT_SHIFT_NAMES, layout: lay.twoRow ? 'two-row' : 'single-row' };
   } catch (e) { return { byDate: {}, shifts: DISTRICT_SHIFT_NAMES, error: e.message }; }
 }
 
-// Saves a day's shift figures and note, then writes the summed district
-// totals back to DISTRICT DELIVERIES so the two never disagree.
+// Saves a day's shift figures exactly as entered, into whatever columns the
+// sheet already has, and mirrors the summed district totals into DISTRICT
+// DELIVERIES. A district whose three shifts are all blank is left alone there
+// rather than being overwritten with a zero.
 function saveDistrictShiftRow(payload) {
   try {
     if (!payload || !payload.dateStr) throw new Error('No date given.');
     var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
     var districts = _districtNames_(ss);
     var sh = _ensureDistrictShiftSheet_(ss, districts);
-    var map = _shiftColumnMap_(sh);
+    var lay = _dsLayout_(sh);
 
-    // Find or append the day's row.
     var all = sh.getDataRange().getValues();
     var target = -1;
-    for (var r = 1; r < all.length; r++) {
+    for (var r = lay.dataStart - 1; r < all.length; r++) {
       if (_normDateStr_(all[r][0]) === payload.dateStr) { target = r + 1; break; }
     }
     if (target === -1) {
-      target = Math.max(sh.getLastRow() + 1, 2);
-      sh.getRange(target, 1).setNumberFormat('@');
-      sh.getRange(target, 1).setValue(payload.dateStr);
+      target = Math.max(sh.getLastRow() + 1, lay.dataStart);
+      var parts = payload.dateStr.split('-');
+      sh.getRange(target, 1).setValue(
+        new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)));
     }
 
     var vals = payload.values || {};
-    var totals = [];
+    var totals = [], unmatched = [];
     districts.forEach(function(d){
-      var sum = 0;
+      var sum = 0, touched = false;
       DISTRICT_SHIFT_NAMES.forEach(function(sn){
         var key = _shiftKey_(d + ' ' + sn);
-        var n = safeNum(vals[key]);
+        var raw = vals[key];
+        var n = safeNum(raw);
         sum += n;
-        if (map[key] !== undefined) sh.getRange(target, map[key] + 1).setValue(n);
+        if (raw !== undefined && raw !== null && String(raw) !== '') touched = true;
+        var col = lay.colOf[key];
+        if (col !== undefined) sh.getRange(target, col + 1).setValue(n);
+        else unmatched.push(d + ' ' + sn);
       });
-      totals.push({ district: d, total: sum });
+      totals.push({ district: d, total: sum, touched: touched });
     });
 
-    if (map['notes'] !== undefined) {
-      sh.getRange(target, map['notes'] + 1).setValue(String(payload.notes || ''));
+    if (lay.notesCol > -1) {
+      sh.getRange(target, lay.notesCol + 1).setValue(String(payload.notes || ''));
+    } else if (payload.notes) {
+      // No notes column in the sheet — add one rather than dropping the note.
+      var at = sh.getLastColumn() + 1;
+      sh.getRange(1, at).setValue('Notes').setFontWeight('bold');
+      sh.getRange(target, at).setValue(String(payload.notes));
+      lay.notesCol = at - 1;
     }
 
-    // Mirror the summed totals into DISTRICT DELIVERIES.
-    var mirrored = false;
+    var mirrored = 0;
     if (payload.sheetRow) {
       var dd = ss.getSheetByName('DISTRICT DELIVERIES');
       if (dd) {
         var ddHdr = dd.getRange(1, 1, 1, Math.max(dd.getLastColumn(), 1)).getValues()[0];
         for (var t = 0; t < totals.length; t++) {
+          if (!totals[t].touched && totals[t].total === 0) continue;
           for (var c3 = 1; c3 < ddHdr.length; c3++) {
             if (_shiftKey_(ddHdr[c3]) === _shiftKey_(totals[t].district)) {
               dd.getRange(payload.sheetRow, c3 + 1).setValue(totals[t].total);
-              mirrored = true;
+              mirrored++;
               break;
             }
           }
@@ -2322,7 +2351,9 @@ function saveDistrictShiftRow(payload) {
 
     SpreadsheetApp.flush();
     _invalidateCache();
-    return { ok: true, totals: totals, mirrored: mirrored, row: target };
+    return { ok: true, totals: totals, mirrored: mirrored, row: target,
+             layout: lay.twoRow ? 'two-row' : 'single-row',
+             unmatched: unmatched.slice(0, 8), unmatchedCount: unmatched.length };
   } catch (e) {
     return { ok: false, error: e.message };
   }
