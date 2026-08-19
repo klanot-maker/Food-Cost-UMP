@@ -32,7 +32,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-08-17.e';
+var UMP_BUILD    = '2026-08-18.a';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 function _invalidateCache() {
@@ -62,7 +62,8 @@ function getCapacityPageData() {
     forecast:    getForecastData(ss),
     logistics:   getLogisticsData(ss),
     wowDistrict: getWowDistrictData(ss),
-    districtDel: getDistrictDeliveriesData(ss)
+    districtDel: getDistrictDeliveriesData(ss),
+    districtShifts: getDistrictShiftData(ss)
   };
   try {
     var json = JSON.stringify(data);
@@ -374,6 +375,7 @@ function getAllData() {
     logistics:    cap.logistics,
     wowDistrict:  cap.wowDistrict,
     districtDel:  cap.districtDel,
+    districtShifts: cap.districtShifts,
     opsOverview:  ops
   };
 }
@@ -2170,6 +2172,162 @@ function updateCapacityTarget(weekStr, newTarget) {
 }
 
 // ════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// DISTRICT SHIFTS — Early Morning / Morning / Evening per district,
+// plus one note per day. Held on its own sheet so DISTRICT DELIVERIES keeps
+// its existing shape; the district figures there stay authoritative and are
+// rewritten from the shift totals whenever a day is saved.
+// ════════════════════════════════════════════════════════════
+var SHEET_DISTRICT_SHIFTS = 'DISTRICT SHIFTS';
+var DISTRICT_SHIFT_NAMES  = ['Early Morning', 'Morning', 'Evening'];
+
+function _shiftKey_(s) { return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toLowerCase(); }
+
+// Districts are whatever DISTRICT DELIVERIES lists, minus its Total column,
+// so the two sheets cannot drift apart.
+function _districtNames_(ss) {
+  var d = getDistrictDeliveriesData(ss);
+  return (d.headers || []).filter(function(h){ return h.toLowerCase().indexOf('total') === -1; });
+}
+
+function _ensureDistrictShiftSheet_(ss, districts) {
+  var sh = ss.getSheetByName(SHEET_DISTRICT_SHIFTS);
+  var wanted = ['Date'];
+  districts.forEach(function(d){
+    DISTRICT_SHIFT_NAMES.forEach(function(sn){ wanted.push(d + ' ' + sn); });
+  });
+  wanted.push('Notes');
+
+  if (!sh) {
+    sh = ss.insertSheet(SHEET_DISTRICT_SHIFTS);
+    sh.getRange(1, 1, 1, wanted.length).setValues([wanted]);
+    sh.getRange(1, 1, 1, wanted.length).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.setFrozenColumns(1);
+  } else {
+    // A district added later needs its three columns; existing ones stay put.
+    var have = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0]
+                 .map(function(h){ return _shiftKey_(h); });
+    var missing = wanted.filter(function(w){ return have.indexOf(_shiftKey_(w)) === -1; });
+    if (missing.length) {
+      var at = sh.getLastColumn() + 1;
+      sh.getRange(1, at, 1, missing.length).setValues([missing]);
+      sh.getRange(1, at, 1, missing.length).setFontWeight('bold');
+    }
+  }
+  try { sh.getRange('A:A').setNumberFormat('@'); } catch (e) {}
+  return sh;
+}
+
+function _shiftColumnMap_(sh) {
+  var hdr = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0];
+  var map = {};
+  for (var c = 0; c < hdr.length; c++) {
+    var k = _shiftKey_(hdr[c]);
+    if (k) map[k] = c;
+  }
+  return map;
+}
+
+function _normDateStr_(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return v.getFullYear() + '-' + pad2(v.getMonth() + 1) + '-' + pad2(v.getDate());
+  }
+  return String(v == null ? '' : v).trim().substring(0, 10);
+}
+
+function getDistrictShiftData(ss) {
+  try {
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    var sh = ss.getSheetByName(SHEET_DISTRICT_SHIFTS);
+    if (!sh) return { byDate: {}, shifts: DISTRICT_SHIFT_NAMES };
+    var all = sh.getDataRange().getValues();
+    if (all.length < 2) return { byDate: {}, shifts: DISTRICT_SHIFT_NAMES };
+
+    var hdr = (all[0] || []).map(function(h){ return String(h || '').trim(); });
+    var notesAt = -1;
+    for (var c = 0; c < hdr.length; c++) if (_shiftKey_(hdr[c]) === 'notes') { notesAt = c; break; }
+
+    var byDate = {};
+    for (var r = 1; r < all.length; r++) {
+      var ds = _normDateStr_(all[r][0]);
+      if (!ds) continue;
+      var rec = { values: {}, notes: notesAt > -1 ? String(all[r][notesAt] || '') : '', sheetRow: r + 1 };
+      for (var c2 = 1; c2 < hdr.length; c2++) {
+        if (c2 === notesAt || !hdr[c2]) continue;
+        rec.values[_shiftKey_(hdr[c2])] = safeNum(all[r][c2]);
+      }
+      byDate[ds] = rec;
+    }
+    return { byDate: byDate, shifts: DISTRICT_SHIFT_NAMES };
+  } catch (e) { return { byDate: {}, shifts: DISTRICT_SHIFT_NAMES, error: e.message }; }
+}
+
+// Saves a day's shift figures and note, then writes the summed district
+// totals back to DISTRICT DELIVERIES so the two never disagree.
+function saveDistrictShiftRow(payload) {
+  try {
+    if (!payload || !payload.dateStr) throw new Error('No date given.');
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var districts = _districtNames_(ss);
+    var sh = _ensureDistrictShiftSheet_(ss, districts);
+    var map = _shiftColumnMap_(sh);
+
+    // Find or append the day's row.
+    var all = sh.getDataRange().getValues();
+    var target = -1;
+    for (var r = 1; r < all.length; r++) {
+      if (_normDateStr_(all[r][0]) === payload.dateStr) { target = r + 1; break; }
+    }
+    if (target === -1) {
+      target = Math.max(sh.getLastRow() + 1, 2);
+      sh.getRange(target, 1).setNumberFormat('@');
+      sh.getRange(target, 1).setValue(payload.dateStr);
+    }
+
+    var vals = payload.values || {};
+    var totals = [];
+    districts.forEach(function(d){
+      var sum = 0;
+      DISTRICT_SHIFT_NAMES.forEach(function(sn){
+        var key = _shiftKey_(d + ' ' + sn);
+        var n = safeNum(vals[key]);
+        sum += n;
+        if (map[key] !== undefined) sh.getRange(target, map[key] + 1).setValue(n);
+      });
+      totals.push({ district: d, total: sum });
+    });
+
+    if (map['notes'] !== undefined) {
+      sh.getRange(target, map['notes'] + 1).setValue(String(payload.notes || ''));
+    }
+
+    // Mirror the summed totals into DISTRICT DELIVERIES.
+    var mirrored = false;
+    if (payload.sheetRow) {
+      var dd = ss.getSheetByName('DISTRICT DELIVERIES');
+      if (dd) {
+        var ddHdr = dd.getRange(1, 1, 1, Math.max(dd.getLastColumn(), 1)).getValues()[0];
+        for (var t = 0; t < totals.length; t++) {
+          for (var c3 = 1; c3 < ddHdr.length; c3++) {
+            if (_shiftKey_(ddHdr[c3]) === _shiftKey_(totals[t].district)) {
+              dd.getRange(payload.sheetRow, c3 + 1).setValue(totals[t].total);
+              mirrored = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    SpreadsheetApp.flush();
+    _invalidateCache();
+    return { ok: true, totals: totals, mirrored: mirrored, row: target };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 // WRITE-BACK — update a DISTRICT DELIVERIES row
 // sheetRow: 1-based row number; colIdxs: 1-based col numbers; values: matching array
 // ════════════════════════════════════════════════════════════

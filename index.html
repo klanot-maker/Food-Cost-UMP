@@ -506,6 +506,26 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 .ops-dept-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:8px 8px 0 0;}
 .ops-dept-name{font-size:10px;font-weight:700;color:var(--lt);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;}
 .ops-dept-total{font-size:36px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-bottom:10px;}
+/* ── District shift editor ── */
+.ds-group{border:1.5px solid var(--border);border-radius:var(--rs);padding:10px 12px;margin-bottom:10px;background:var(--card);}
+.ds-group-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.ds-district{font-size:11px;font-weight:800;color:var(--txt);text-transform:uppercase;letter-spacing:.06em;}
+.ds-total{font-size:16px;font-weight:800;color:var(--br);font-variant-numeric:tabular-nums;}
+.ds-row{display:flex;align-items:center;gap:10px;margin-bottom:5px;}
+.ds-row label{font-size:11px;font-weight:600;color:var(--mut);width:112px;flex-shrink:0;}
+.ds-input{flex:1;border:1.5px solid var(--border);border-radius:var(--rs);padding:6px 9px;font-size:13px;font-family:'Lato',sans-serif;color:var(--txt);background:#fff;outline:none;}
+.ds-input:focus{border-color:var(--br);}
+.ds-note{font-size:10.5px;color:#8A5A08;background:#FEF5E7;border-radius:6px;padding:5px 8px;margin-top:5px;}
+.dd-exp-row>td{background:var(--card);padding:0!important;}
+.dd-exp-wrap{padding:12px 16px;}
+.dd-exp-tbl{width:100%;border-collapse:collapse;font-size:12px;}
+.dd-exp-tbl th{text-align:right;font-size:9px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;padding:4px 8px;}
+.dd-exp-tbl th:first-child{text-align:left;}
+.dd-exp-tbl td{padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums;color:var(--txt);}
+.dd-exp-tbl td:first-child{text-align:left;font-weight:700;}
+.dd-exp-notes{margin-top:9px;font-size:12px;color:var(--txt);background:#fff;border:1.5px solid var(--border);border-radius:var(--rs);padding:8px 11px;line-height:1.5;}
+.dd-toggle{background:none;border:none;color:var(--br);cursor:pointer;font-size:13px;padding:2px 5px;}
+
 /* ── Logistics cost page ──
    Sits on a white sheet so every figure is black-on-white; the body
    gradient is only visible outside it. */
@@ -1960,7 +1980,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-08-17.e';
+var UMP_BUILD_UI='2026-08-18.a';
 var UMP_BUILD_SERVER=null;
 var _lgcEditMode=false;
 var _lgcEditingId=null;
@@ -4449,8 +4469,15 @@ function renderDistrictDeliveries(distData){
   var badge=document.getElementById('districtDelivBadge');
   if(badge)badge.textContent=sorted.length+' rows';
   bEl.innerHTML=sorted.map(function(r){
+    var ds10=String(r.dateStr).substring(0,10);
+    var rec=_dsRecord(ds10);
+    var hasNote=!!(rec&&String(rec.notes||'').trim());
+    var hasShifts=false;
+    if(rec&&rec.values){ for(var kk in rec.values){ if(rec.values[kk]>0){hasShifts=true;break;} } }
     return'<tr>'
-      +'<td class="cat" style="white-space:nowrap">'+_fmtDistDate(r.dateStr)+'</td>'
+      +'<td class="cat" style="white-space:nowrap">'
+        +((hasShifts||hasNote)?'<button class="dd-toggle" title="Show shift split and notes" onclick="_ddToggle(this,\''+ds10+'\','+(hdrs.length+2)+')">▸</button> ':'')
+        +_fmtDistDate(r.dateStr)+(hasNote?' <span title="has a note">💬</span>':'')+'</td>'
       +r.values.map(function(v,i){
           var isTot=hdrs[i]&&hdrs[i].toLowerCase().indexOf('total')>-1;
           return'<td class="mn"'+(isTot?' style="font-weight:700"':'')+'>'+( v>0?v.toLocaleString():'—')+'</td>';
@@ -4546,6 +4573,18 @@ function _applyCapTargetLocally(weekStr,newTarget){
 // ── Edit District Row ────────────────────────────────────────
 var _editDistrictData = null;
 
+function _dsKey(s){ return String(s==null?'':s).trim().replace(/\s+/g,' ').toLowerCase(); }
+var DS_SHIFTS=['Early Morning','Morning','Evening'];
+
+function _dsDistricts(){
+  var hdrs=((DATA.districtDel||{}).headers)||[];
+  return hdrs.filter(function(h){ return h.toLowerCase().indexOf('total')===-1; });
+}
+function _dsRecord(dateStr){
+  var byDate=((DATA.districtShifts||{}).byDate)||{};
+  return byDate[String(dateStr).substring(0,10)]||null;
+}
+
 function openEditDistrictRow(sheetRow, dateStr){
   var distData=DATA.districtDel||{};
   var hdrs=distData.headers||[];
@@ -4553,18 +4592,103 @@ function openEditDistrictRow(sheetRow, dateStr){
   var rowData=null;
   for(var i=0;i<rows.length;i++){if(rows[i].sheetRow===sheetRow){rowData=rows[i];break;}}
   if(!rowData)return;
-  _editDistrictData={sheetRow:sheetRow,dateStr:dateStr,headers:hdrs,values:rowData.values.slice()};
+  var districts=_dsDistricts();
+  var rec=_dsRecord(dateStr);
+  _editDistrictData={sheetRow:sheetRow,dateStr:String(dateStr).substring(0,10),
+                     headers:hdrs,districts:districts,values:rowData.values.slice()};
+
   document.getElementById('editDistrictTitle').textContent='✏️ Edit — '+_fmtDistDate(dateStr);
-  document.getElementById('editDistrictSub').textContent='Updates DISTRICT DELIVERIES sheet · Total column is auto-calculated';
+  document.getElementById('editDistrictSub').textContent=
+    'Each district is the sum of its three shifts · district totals are written back to DISTRICT DELIVERIES';
+
   var html='';
-  hdrs.forEach(function(h,i){
-    if(h.toLowerCase().indexOf('total')>-1)return;
-    html+='<div class="modal-field"><label>'+h+'</label>'
-      +'<input type="number" min="0" id="ddist_'+i+'" value="'+(rowData.values[i]||0)+'"></div>';
+  districts.forEach(function(d,di){
+    // The existing district figure seeds Morning when no shift split exists
+    // yet, so a day already entered is not silently zeroed on first save.
+    var existing=0;
+    for(var k=0;k<hdrs.length;k++){ if(_dsKey(hdrs[k])===_dsKey(d)){ existing=rowData.values[k]||0; break; } }
+    var seeded=false, vals=[];
+    DS_SHIFTS.forEach(function(sn){
+      var v=rec&&rec.values?rec.values[_dsKey(d+' '+sn)]:undefined;
+      vals.push(v===undefined?null:v);
+    });
+    var anyShift=vals.some(function(v){ return v!==null&&v>0; });
+    if(!anyShift&&existing>0){ vals=[0,existing,0]; seeded=true; }
+
+    html+='<div class="ds-group">'
+      +'<div class="ds-group-hd">'
+        +'<span class="ds-district">'+d+'</span>'
+        +'<span class="ds-total" id="dstot_'+di+'">0</span>'
+      +'</div>';
+    DS_SHIFTS.forEach(function(sn,si){
+      html+='<div class="ds-row"><label>'+sn+'</label>'
+        +'<input type="number" min="0" class="ds-input" id="dsh_'+di+'_'+si+'" '
+        +'data-di="'+di+'" value="'+(vals[si]===null?0:vals[si])+'" oninput="_dsRecalc('+di+')"></div>';
+    });
+    if(seeded) html+='<div class="ds-note">No shift split recorded yet — the existing '
+      +existing.toLocaleString()+' has been placed under Morning. Adjust as needed.</div>';
+    html+='</div>';
   });
+
+  html+='<div style="margin-top:14px;">'
+    +'<div class="lgc-ctl-lbl">Notes — fleet added or removed, anything unusual</div>'
+    +'<textarea id="dsNotes" rows="4" placeholder="e.g. 2 vans added to Al Ain from 18 Aug. 1 truck off the road in Sharjah for servicing." '
+    +'style="width:100%;border:1.5px solid var(--border);border-radius:var(--rs);padding:9px 11px;font-size:13px;'
+    +'font-family:\'Lato\',sans-serif;color:var(--txt);background:#fff;outline:none;resize:vertical;">'
+    +String((rec&&rec.notes)||'').replace(/</g,'&lt;')+'</textarea></div>'
+    +'<div id="dsSaveMsg" class="lgc-note" style="margin-top:8px;"></div>';
+
   document.getElementById('editDistrictBody').innerHTML=html;
+  districts.forEach(function(d,di){ _dsRecalc(di); });
   document.getElementById('editDistrictModal').classList.remove('hidden');
 }
+
+// Expands a day into its three shifts plus the day's note.
+function _ddToggle(btn,ds10,span){
+  var tr=btn.closest('tr');
+  if(!tr) return;
+  var next=tr.nextElementSibling;
+  if(next&&next.classList.contains('dd-exp-row')){ next.remove(); btn.textContent='▸'; return; }
+  btn.textContent='▾';
+  var rec=_dsRecord(ds10);
+  var districts=_dsDistricts();
+  var h='<table class="dd-exp-tbl"><thead><tr><th>Shift</th>'
+    +districts.map(function(d){return '<th>'+d+'</th>';}).join('')+'<th>Total</th></tr></thead><tbody>';
+  var colTot={},grand=0;
+  DS_SHIFTS.forEach(function(sn){
+    var rowTot=0;
+    var cells=districts.map(function(d){
+      var v=(rec&&rec.values)?(rec.values[_dsKey(d+' '+sn)]||0):0;
+      rowTot+=v; colTot[d]=(colTot[d]||0)+v;
+      return '<td>'+(v>0?v.toLocaleString():'—')+'</td>';
+    }).join('');
+    grand+=rowTot;
+    h+='<tr><td>'+sn+'</td>'+cells+'<td style="font-weight:800;">'+(rowTot>0?rowTot.toLocaleString():'—')+'</td></tr>';
+  });
+  h+='<tr style="border-top:1.5px solid var(--border);"><td>Total</td>'
+    +districts.map(function(d){return '<td style="font-weight:800;">'+((colTot[d]||0)>0?colTot[d].toLocaleString():'—')+'</td>';}).join('')
+    +'<td style="font-weight:800;color:var(--br);">'+(grand>0?grand.toLocaleString():'—')+'</td></tr>';
+  h+='</tbody></table>';
+  var note=rec&&String(rec.notes||'').trim();
+  if(note) h+='<div class="dd-exp-notes"><b>Notes</b><br>'+note.replace(/</g,'&lt;').replace(/\n/g,'<br>')+'</div>';
+  else h+='<div class="lgc-note" style="margin-top:8px;">No notes recorded for this day.</div>';
+  var exp=document.createElement('tr');
+  exp.className='dd-exp-row';
+  exp.innerHTML='<td colspan="'+span+'"><div class="dd-exp-wrap">'+h+'</div></td>';
+  tr.parentNode.insertBefore(exp,tr.nextSibling);
+}
+
+function _dsRecalc(di){
+  var sum=0;
+  DS_SHIFTS.forEach(function(sn,si){
+    var el=document.getElementById('dsh_'+di+'_'+si);
+    var v=el?parseFloat(el.value):0;
+    if(!isNaN(v)) sum+=v;
+  });
+  var t=document.getElementById('dstot_'+di);
+  if(t) t.textContent=sum.toLocaleString();
+}
+
 function closeEditDistrict(){
   document.getElementById('editDistrictModal').classList.add('hidden');
   _editDistrictData=null;
@@ -4572,33 +4696,38 @@ function closeEditDistrict(){
 function saveEditDistrict(){
   if(!_editDistrictData)return;
   if(typeof google==='undefined'||!google.script){alert('Write-back only works inside Google Apps Script.');return;}
-  var hdrs=_editDistrictData.headers;
-  var sheetRow=_editDistrictData.sheetRow;
-  var colIdxs=[],values=[];
-  hdrs.forEach(function(h,i){
-    if(h.toLowerCase().indexOf('total')>-1)return;
-    var inp=document.getElementById('ddist_'+i);
-    if(!inp)return;
-    colIdxs.push(i+2); // col A=date(1), districts start col 2
-    values.push(parseFloat(inp.value)||0);
+  var districts=_editDistrictData.districts||[];
+  var values={};
+  districts.forEach(function(d,di){
+    DS_SHIFTS.forEach(function(sn,si){
+      var el=document.getElementById('dsh_'+di+'_'+si);
+      var v=el?parseFloat(el.value):0;
+      values[_dsKey(d+' '+sn)]=isNaN(v)?0:v;
+    });
   });
-  var saveBtn=document.querySelector('#editDistrictModal .modal-save');
-  saveBtn.textContent='⏳ Saving…';saveBtn.disabled=true;
-  var capData={sheetRow:sheetRow,dateStr:_editDistrictData.dateStr,headers:hdrs,colIdxs:colIdxs,values:values};
-  var _t=setTimeout(function(){
-    saveBtn.textContent='💾 Save to Sheet';saveBtn.disabled=false;
-    closeEditDistrict();_applyDistrictLocally(capData);refreshData();
-  },3000);
+  var notesEl=document.getElementById('dsNotes');
+  var msg=document.getElementById('dsSaveMsg');
+  var btn=document.getElementById('editDistrictSaveBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
+  if(msg) msg.textContent='';
   google.script.run
-    .withSuccessHandler(function(){
-      clearTimeout(_t);saveBtn.textContent='💾 Save to Sheet';saveBtn.disabled=false;
-      closeEditDistrict();_applyDistrictLocally(capData);refreshData();
+    .withSuccessHandler(function(res){
+      if(btn){ btn.disabled=false; btn.textContent='💾 Save to Sheet'; }
+      if(!res||!res.ok){
+        if(msg) msg.innerHTML='<span style="color:var(--red);font-weight:700;">'
+          +((res&&res.error)||'Save failed.')+'</span>';
+        return;
+      }
+      closeEditDistrict();
+      refreshData();
     })
-    .withFailureHandler(function(err){
-      clearTimeout(_t);saveBtn.textContent='💾 Save to Sheet';saveBtn.disabled=false;
-      alert('Save failed: '+err.message);
+    .withFailureHandler(function(e){
+      if(btn){ btn.disabled=false; btn.textContent='💾 Save to Sheet'; }
+      if(msg) msg.innerHTML='<span style="color:var(--red);font-weight:700;">'
+        +((e&&e.message)?e.message:'Save failed.')+'</span>';
     })
-    .updateDistrictRow(sheetRow,colIdxs,values);
+    .saveDistrictShiftRow({dateStr:_editDistrictData.dateStr, sheetRow:_editDistrictData.sheetRow,
+                           values:values, notes:notesEl?notesEl.value:''});
 }
 function _applyDistrictLocally(capData){
   function upd(d){
@@ -6287,7 +6416,7 @@ _lgReady();
     <div class="modal-body" id="editDistrictBody"></div>
     <div class="modal-foot">
       <button class="modal-cancel" onclick="closeEditDistrict()">Cancel</button>
-      <button class="modal-save" onclick="saveEditDistrict()">💾 Save to Sheet</button>
+      <button class="modal-save" id="editDistrictSaveBtn" onclick="saveEditDistrict()">💾 Save to Sheet</button>
     </div>
   </div>
 </div>
