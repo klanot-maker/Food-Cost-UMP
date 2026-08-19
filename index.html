@@ -507,6 +507,9 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 .ops-dept-name{font-size:10px;font-weight:700;color:var(--lt);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;}
 .ops-dept-total{font-size:36px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-bottom:10px;}
 /* ── District date-range picker ── */
+.um-pw-state{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.03em;border-radius:10px;padding:2px 8px;white-space:nowrap;}
+.um-pw-state.secure{background:var(--brl);color:var(--brd);border:1px solid var(--border);}
+.um-pw-state.plain{background:#FDECEC;color:#B3261E;border:1px solid #F3C9C6;}
 .dd-pending{display:inline-block;margin-left:6px;background:var(--brl);color:var(--brd);border:1px solid var(--border);border-radius:10px;padding:1px 7px;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;vertical-align:middle;}
 .ddp-wrap{position:relative;display:inline-block;}
 .ddp-btn{display:flex;align-items:center;gap:7px;background:#fff;border:1.5px solid var(--border);border-radius:22px;padding:6px 14px;font-size:12.5px;font-weight:700;color:var(--txt);cursor:pointer;font-family:'Lato',sans-serif;transition:border-color .15s;}
@@ -954,8 +957,13 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
       <div class="sp-section-lbl" style="margin:0;">👥 Users with Access</div>
-      <div id="umMsg" style="font-size:12px;display:none;background:var(--brl);border-radius:6px;padding:4px 10px;"></div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div id="umMsg" style="font-size:12px;display:none;background:var(--brl);border-radius:6px;padding:4px 10px;"></div>
+        <button id="umSecureBtn" onclick="doSecurePasswords()" title="Convert any password still stored in readable form"
+          style="background:none;border:1.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:11.5px;font-weight:700;color:var(--txt);cursor:pointer;font-family:'Lato',sans-serif;white-space:nowrap;">🔒 Secure stored passwords</button>
+      </div>
     </div>
+    <div id="umSecureNote" style="display:none;font-size:11.5px;border-radius:6px;padding:9px 12px;margin-bottom:12px;"></div>
     <div id="umLoading" style="text-align:center;padding:28px;font-size:13px;color:var(--lt);">Loading…</div>
     <div id="umCards"></div>
   </div>
@@ -1980,7 +1988,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-08-19.c';
+var UMP_BUILD_UI='2026-08-19.d';
 var UMP_BUILD_SERVER=null;
 var _lgcEditMode=false;
 var _lgcEditingId=null;
@@ -5304,6 +5312,7 @@ function _loadUsers(){
       document.getElementById('umLoading').style.display='none';
       if(!res||!res.ok){document.getElementById('umLoading').textContent=(res&&res.err)||'Failed to load users.';document.getElementById('umLoading').style.display='block';return;}
       _renderUsers(res.users||[]);
+      _umAudit(res.users||[]);
     })
     .withFailureHandler(function(e){
       document.getElementById('umLoading').textContent='Error: '+(e&&e.message||'Unknown');
@@ -5334,13 +5343,14 @@ function _renderUsers(users){
   var rows=users.map(function(u){
     var isMe=u.email===_userEmail;
     var eid='role_'+btoa(u.email).replace(/[^A-Za-z0-9]/g,'');
-    var pid='pw_'+btoa(u.email).replace(/[^A-Za-z0-9]/g,'');
-    // Password cell
-    var pwMasked=u.password?'••••••':'—';
-    var pwCell=u.password
-      ?'<div class="um-pw-wrap"><span class="um-pw-val" id="'+pid+'">••••••</span>'
-        +'<button class="um-eye-btn" onclick="umTogglePw(\''+pid+'\',\''+u.password.replace(/'/g,"\\'")+'\')" title="Show/hide password">👁</button></div>'
-      :'<span style="color:var(--lt);font-size:11px;">— not set —</span>';
+    // Passwords are stored hashed and are never sent to the browser, so there
+    // is nothing to reveal. All this can report is whether one is set, and
+    // whether it has been converted from the old readable form yet.
+    var pwCell=!u.hasPass
+      ?'<span style="color:var(--lt);font-size:11px;">— not set —</span>'
+      :(u.secured
+        ?'<span class="um-pw-state secure" title="Stored as a salted hash">🔒 Secured</span>'
+        :'<span class="um-pw-state plain" title="Still stored in readable form — converts on next sign-in, or use Secure stored passwords">⚠ Readable</span>');
     // Role cell
     var roleCell='<div class="um-tbl-role-wrap">'
       +'<select class="um-tbl-role-sel" id="'+eid+'">'
@@ -5366,14 +5376,50 @@ function _renderUsers(users){
       +'</tr>';
   }).join('');
   container.innerHTML='<div style="overflow-x:auto;"><table class="um-table"><thead><tr>'
-    +'<th>Email</th><th>Password</th><th>Role</th><th>Reset Token</th><th>Actions</th>'
+    +'<th>Email</th><th>Password</th><th>Role</th><th>Reset link</th><th>Actions</th>'
     +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
-function umTogglePw(id, actual){
-  var el=document.getElementById(id);
-  if(!el)return;
-  el.textContent=(el.textContent==='••••••')?actual:'••••••';
+// Says plainly how many rows are still readable, so the state of the sheet is
+// visible rather than something you have to go and check.
+function _umAudit(users){
+  var note=document.getElementById('umSecureNote'), btn=document.getElementById('umSecureBtn');
+  if(!note) return;
+  var plain=users.filter(function(u){return u.hasPass&&!u.secured;}).length;
+  if(plain){
+    note.style.display='block';
+    note.style.background='#FDECEC'; note.style.color='#B3261E'; note.style.border='1px solid #F3C9C6';
+    note.innerHTML='<b>'+plain+' password'+(plain===1?' is':'s are')+' still stored in readable form.</b> '
+      +'They convert automatically the next time each person signs in — or press '
+      +'<b>Secure stored passwords</b> to convert them all now. Nobody is signed out and no one needs to reset.';
+    if(btn) btn.style.borderColor='#B3261E';
+  } else {
+    note.style.display='block';
+    note.style.background='var(--brl)'; note.style.color='var(--brd)'; note.style.border='1px solid var(--border)';
+    note.innerHTML='🔒 Every stored password is hashed. Nothing here can be read back, including by you.';
+    if(btn) btn.style.borderColor='var(--border)';
+  }
 }
+
+function doSecurePasswords(){
+  var btn=document.getElementById('umSecureBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Securing…'; }
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(btn){ btn.disabled=false; btn.textContent='🔒 Secure stored passwords'; }
+      if(!r||!r.ok){ _umShowMsg((r&&r.err)||'Could not convert.',true); return; }
+      var bits=[];
+      bits.push(r.converted+' password'+(r.converted===1?'':'s')+' converted');
+      if(r.clearedTokens) bits.push(r.clearedTokens+' old reset link'+(r.clearedTokens===1?'':'s')+' retired');
+      _umShowMsg('✅ '+bits.join(' · '));
+      _loadUsers();
+    })
+    .withFailureHandler(function(e){
+      if(btn){ btn.disabled=false; btn.textContent='🔒 Secure stored passwords'; }
+      _umShowMsg('Error: '+((e&&e.message)||'Unknown'),true);
+    })
+    .hashAllPlaintextPasswords(_userEmail);
+}
+
 function _umShowMsg(msg, isErr){
   var el=document.getElementById('umMsg');
   el.textContent=msg;

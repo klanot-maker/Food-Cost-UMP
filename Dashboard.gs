@@ -32,7 +32,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-08-19.c';
+var UMP_BUILD    = '2026-08-19.d';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 // A cache entry is capped at ~100 KB, and the page payloads outgrew that: the
@@ -2475,6 +2475,87 @@ function fmtCellDate(val) {
 // Status: approved (all users); sheet is auto-migrated on first call
 var SUPER_ADMINS = ['k.lanot@calo.app', 'a.mohamed@calo.app'];
 
+// ── PASSWORD STORAGE ─────────────────────────────────────────
+// Passwords used to sit in the sheet as typed, which meant anyone who could
+// open the file could read them — and people reuse passwords, so the damage
+// reached past this dashboard. What is stored now is a salted hash: a one-way
+// result that can confirm a password without revealing it.
+//
+// Format: s1$<rounds>$<salt>$<hash>. The round count travels with each hash,
+// so raising _PW_ROUNDS later leaves existing logins working.
+//
+// Honest limit: Apps Script has no bcrypt or Argon2, so this is iterated
+// SHA-256. Far weaker than a purpose-built password hash, immeasurably better
+// than plain text. Moving login to a managed identity service removes the
+// problem entirely, because then nothing is stored here at all.
+var _PW_ROUNDS = 2000;   // lower if login feels slow; old hashes keep working
+
+function _pwHash_(password, salt, rounds) {
+  var bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256, salt + '\u0000' + String(password), Utilities.Charset.UTF_8);
+  var key = Utilities.newBlob(salt).getBytes();
+  // Iterating on the raw bytes avoids a string conversion per round, which is
+  // what would actually make this slow.
+  for (var i = 0; i < rounds; i++) bytes = Utilities.computeHmacSha256Signature(bytes, key);
+  return Utilities.base64Encode(bytes);
+}
+
+function _pwMake_(password) {
+  var salt = Utilities.getUuid().replace(/-/g, '');
+  return 's1$' + _PW_ROUNDS + '$' + salt + '$' + _pwHash_(password, salt, _PW_ROUNDS);
+}
+
+function _pwIsHashed_(stored) {
+  return /^s1\$\d+\$[0-9a-f]{32}\$/.test(String(stored || ''));
+}
+
+// Compares without letting the time taken reveal how much of the value matched.
+function _pwEq_(a, b) {
+  a = String(a); b = String(b);
+  if (a.length !== b.length) return false;
+  var d = 0;
+  for (var i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+
+// legacy:true means the row still held a plain-text password. The caller
+// rewrites it as a hash, so accounts convert themselves as people sign in and
+// nobody is locked out or asked to reset.
+function _pwVerify_(password, stored) {
+  stored = String(stored || '');
+  if (!stored) return { ok: false, legacy: false };
+  if (!_pwIsHashed_(stored)) return { ok: _pwEq_(stored.trim(), String(password)), legacy: true };
+  var parts = stored.split('$');
+  var rounds = parseInt(parts[1], 10) || _PW_ROUNDS;
+  return { ok: _pwEq_(_pwHash_(password, parts[2], rounds), parts[3]), legacy: false };
+}
+
+// Writes a hash into column B as literal text, so the sheet cannot reinterpret it.
+function _pwWrite_(sheet, row, password) {
+  sheet.getRange(row, 2).setNumberFormat('@').setValue(_pwMake_(password));
+}
+
+// Reset tokens get hashed too. Left readable, they would let anyone with the
+// sheet open take over an account through the reset flow, which would undo the
+// point of hashing the passwords. One pass is enough here — a UUID has far more
+// entropy than a password, so there is nothing to guess at.
+function _tokHash_(token) {
+  return Utilities.base64Encode(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(token), Utilities.Charset.UTF_8));
+}
+
+function _tokMatches_(stored, token) {
+  stored = String(stored || '').trim();
+  if (!stored || !token) return false;
+  return _pwEq_(stored, _tokHash_(token)) || _pwEq_(stored, String(token));  // pre-hash tokens still work
+}
+
+function _tokWrite_(sheet, row, token, expiry) {
+  sheet.getRange(row, 4).setNumberFormat('@').setValue(_tokHash_(token));
+  sheet.getRange(row, 5).setValue(expiry.toISOString());
+}
+
+
 function _isSuperAdmin(email) {
   return SUPER_ADMINS.indexOf((email||'').trim().toLowerCase()) >= 0;
 }
@@ -2533,7 +2614,8 @@ function registerUser(email, password) {
       }
     }
     var role = _isSuperAdmin(email) ? 'super-admin' : 'viewer';
-    sheet.appendRow([email, password, role, '', '', 'approved']);
+    sheet.appendRow([email, '', role, '', '', 'approved']);
+    _pwWrite_(sheet, sheet.getLastRow(), password);
     return {ok:true, role:role, email:email};
   } catch(e) { return {ok:false, err:e.message}; }
 }
@@ -2557,7 +2639,9 @@ function getUsers(callerEmail) {
         role:     String(rows[i][2]||'viewer').trim(),
         status:   String(rows[i][statusIdx]||'approved').trim() || 'approved',
         hasPass:  !!(String(rows[i][1]||'').trim()),
-        password: String(rows[i][1]||'').trim(),
+        // The password itself is never sent anywhere. secured says whether the
+        // row has been converted from plain text yet.
+        secured:  _pwIsHashed_(rows[i][1]),
         hasToken: !!(String(rows[i][3]||'').trim())
       });
     }
@@ -2609,8 +2693,10 @@ function changeOwnPassword(email, currentPass, newPass) {
     for (var i = 1; i < rows.length; i++) {
       if (String(rows[i][0]||'').trim().toLowerCase() !== email) continue;
       var stored = String(rows[i][1]||'').trim();
-      if (stored && stored !== currentPass) return {ok:false, err:'Current password is incorrect.'};
-      sheet.getRange(i+1,2).setValue(newPass);
+      if (stored && !_pwVerify_(currentPass, stored).ok) {
+        return {ok:false, err:'Current password is incorrect.'};
+      }
+      _pwWrite_(sheet, i+1, newPass);
       return {ok:true};
     }
     return {ok:false, err:'User not found.'};
@@ -2634,8 +2720,12 @@ function checkLogin(email, password) {
       if (rowStatus === 'rejected') return {ok:false, err:'Your access has been revoked. Contact your administrator.'};
       // New user — no password set yet
       if (!rowPass) return {ok: false, newUser: true, email: rowEmail};
-      if (rowPass === password) return {ok: true, role: rowRole, email: rowEmail};
-      return {ok: false};
+      var v = _pwVerify_(password, rowPass);
+      if (!v.ok) return {ok: false};
+      // Signing in with a password the sheet still held in the clear is the
+      // moment to replace it with a hash. Silent, and nobody has to reset.
+      if (v.legacy) { try { _pwWrite_(sheet, i+1, password); } catch (e) {} }
+      return {ok: true, role: rowRole, email: rowEmail};
     }
     return {ok: false};
   } catch(e) {
@@ -2673,7 +2763,7 @@ function setPassword(email, newPass) {
       if (rowEmail !== email.trim().toLowerCase()) continue;
       var rowPass = String(rows[i][1] || '').trim();
       if (rowPass) return {ok: false, err: 'Password already set. Use Forgot Password to reset.'};
-      sheet.getRange(i + 1, 2).setValue(newPass); // col B
+      _pwWrite_(sheet, i + 1, newPass); // col B — stored as a hash
       // Mark as approved when setting password for first time (Super Admin pre-seeded users)
       if (!String(rows[i][5]||'').trim()) sheet.getRange(i+1,6).setValue('approved');
       var rowRole = String(rows[i][2] || 'viewer').trim();
@@ -2696,8 +2786,7 @@ function sendPasswordReset(email) {
       // Generate token
       var token   = Utilities.getUuid();
       var expiry  = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-      sheet.getRange(i + 1, 4).setValue(token);  // col D
-      sheet.getRange(i + 1, 5).setValue(expiry.toISOString()); // col E
+      _tokWrite_(sheet, i + 1, token, expiry);  // cols D, E — token stored hashed
       // Build reset link — get the deployed web app URL
       var appUrl  = ScriptApp.getService().getUrl();
       var link    = appUrl + '?reset=' + token;
@@ -2731,8 +2820,7 @@ function sendPasswordResetToAdmin(callerEmail, targetEmail) {
       if (rowEmail !== (targetEmail||'').trim().toLowerCase()) continue;
       var token  = Utilities.getUuid();
       var expiry = new Date(Date.now() + 60 * 60 * 1000);
-      sheet.getRange(i + 1, 4).setValue(token);
-      sheet.getRange(i + 1, 5).setValue(expiry.toISOString());
+      _tokWrite_(sheet, i + 1, token, expiry);
       var appUrl = ScriptApp.getService().getUrl();
       var link   = appUrl + '?reset=' + token;
       MailApp.sendEmail({
@@ -2759,7 +2847,7 @@ function validateResetToken(token) {
     for (var i = 1; i < rows.length; i++) {
       var storedToken = String(rows[i][3] || '').trim();
       var expiryStr   = String(rows[i][4] || '').trim();
-      if (storedToken !== token) continue;
+      if (!_tokMatches_(storedToken, token)) continue;
       if (!expiryStr) return {ok: false, err: 'Token invalid.'};
       if (new Date() > new Date(expiryStr)) return {ok: false, err: 'Reset link has expired. Please request a new one.'};
       return {ok: true, email: String(rows[i][0]).trim().toLowerCase()};
@@ -2779,9 +2867,9 @@ function resetPasswordWithToken(token, newPass) {
     for (var i = 1; i < rows.length; i++) {
       var storedToken = String(rows[i][3] || '').trim();
       var expiryStr   = String(rows[i][4] || '').trim();
-      if (storedToken !== token) continue;
+      if (!_tokMatches_(storedToken, token)) continue;
       if (!expiryStr || new Date() > new Date(expiryStr)) return {ok: false, err: 'Reset link has expired.'};
-      sheet.getRange(i + 1, 2).setValue(newPass); // col B — new password
+      _pwWrite_(sheet, i + 1, newPass); // col B — new password, hashed
       sheet.getRange(i + 1, 4).setValue('');      // col D — clear token
       sheet.getRange(i + 1, 5).setValue('');      // col E — clear expiry
       var rowRole = String(rows[i][2] || 'viewer').trim();
@@ -2791,6 +2879,55 @@ function resetPasswordWithToken(token, newPass) {
   } catch(e) {
     return {ok: false, err: e.message};
   }
+}
+
+// How much of the sheet is still readable. Super Admin only.
+function auditPasswordStorage(callerEmail) {
+  try {
+    if (!_isSuperAdmin((callerEmail||'').trim().toLowerCase())) return {ok:false, err:'Not authorized.'};
+    var rows = _acSheet().getDataRange().getValues();
+    var hashed = 0, plain = 0, notSet = 0, plainEmails = [], tokens = 0;
+    for (var i = 1; i < rows.length; i++) {
+      var email = String(rows[i][0]||'').trim();
+      if (!email) continue;
+      var pw = String(rows[i][1]||'').trim();
+      if (!pw) notSet++;
+      else if (_pwIsHashed_(pw)) hashed++;
+      else { plain++; plainEmails.push(email); }
+      var tok = String(rows[i][3]||'').trim();
+      if (tok && !/^[A-Za-z0-9+\/]{43}=$/.test(tok)) tokens++;   // still a raw UUID
+    }
+    return {ok:true, hashed:hashed, plaintext:plain, notSet:notSet,
+            plaintextEmails:plainEmails, rawTokens:tokens,
+            allSecure:(plain === 0 && tokens === 0)};
+  } catch(e) { return {ok:false, err:e.message}; }
+}
+
+// Converts every remaining plain-text password in place. Everyone's existing
+// password keeps working — hashing what is already stored produces exactly what
+// their next login will be checked against. Super Admin only.
+function hashAllPlaintextPasswords(callerEmail) {
+  try {
+    if (!_isSuperAdmin((callerEmail||'').trim().toLowerCase())) return {ok:false, err:'Not authorized.'};
+    var sheet = _acSheet();
+    var rows = sheet.getDataRange().getValues();
+    var converted = 0, clearedTokens = 0;
+    for (var i = 1; i < rows.length; i++) {
+      if (!String(rows[i][0]||'').trim()) continue;
+      var pw = String(rows[i][1]||'').trim();
+      if (pw && !_pwIsHashed_(pw)) { _pwWrite_(sheet, i+1, pw); converted++; }
+      // Any reset link already in flight was issued against a readable token,
+      // so retire it rather than leave it usable.
+      var tok = String(rows[i][3]||'').trim();
+      if (tok && !/^[A-Za-z0-9+\/]{43}=$/.test(tok)) {
+        sheet.getRange(i+1, 4).setValue('');
+        sheet.getRange(i+1, 5).setValue('');
+        clearedTokens++;
+      }
+    }
+    SpreadsheetApp.flush();
+    return {ok:true, converted:converted, clearedTokens:clearedTokens};
+  } catch(e) { return {ok:false, err:e.message}; }
 }
 
 // ── COMMENTS ─────────────────────────────────────────────────
