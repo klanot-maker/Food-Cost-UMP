@@ -507,6 +507,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 .ops-dept-name{font-size:10px;font-weight:700;color:var(--lt);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;}
 .ops-dept-total{font-size:36px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-bottom:10px;}
 /* ── District date-range picker ── */
+.dd-pending{display:inline-block;margin-left:6px;background:var(--brl);color:var(--brd);border:1px solid var(--border);border-radius:10px;padding:1px 7px;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;vertical-align:middle;}
 .ddp-wrap{position:relative;display:inline-block;}
 .ddp-btn{display:flex;align-items:center;gap:7px;background:#fff;border:1.5px solid var(--border);border-radius:22px;padding:6px 14px;font-size:12.5px;font-weight:700;color:var(--txt);cursor:pointer;font-family:'Lato',sans-serif;transition:border-color .15s;}
 .ddp-btn:hover{border-color:var(--br);}
@@ -1979,7 +1980,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-08-19.b';
+var UMP_BUILD_UI='2026-08-19.c';
 var UMP_BUILD_SERVER=null;
 var _lgcEditMode=false;
 var _lgcEditingId=null;
@@ -4341,7 +4342,9 @@ function _ddpAll(key){
 _ddpInit('dist',{
   read:function(){ return _distFilter; },
   write:function(f,t){
-    _distFilter={from:f,to:t};
+    // picked marks a range the user chose, as opposed to the current month the
+    // page opens on. Only a chosen range offers days that have not happened yet.
+    _distFilter={from:f,to:t,picked:true};
     var a=document.getElementById('distFrom'), b=document.getElementById('distTo');
     if(a) a.value=f||''; if(b) b.value=t||'';
     renderDistrictDeliveries(DATA.districtDel||{headers:[],rows:[]});
@@ -4603,18 +4606,31 @@ function renderDistrictDeliveries(distData){
     +hdrs.map(function(h){var isTot=h.toLowerCase().indexOf('total')>-1;return'<th'+(isTot?' style="font-weight:700"':'')+'>'+h+'</th>';}).join('')
     +'<th></th></tr>';
 
-  // Filter by date range and hide future dates
+  // The page opens on the current month and shows the log as it stands, with
+  // days that have not happened yet left out. Pick a range and it instead shows
+  // every day in that range — including ones the sheet has no row for — so a day
+  // can be filled in ahead of time. Those stand-in rows carry sheetRow 0 and the
+  // backend creates the row on save.
   var s0=_distFilter.from?new Date(_distFilter.from+'T00:00:00'):null;
   var e0=_distFilter.to?new Date(_distFilter.to+'T00:00:00'):null;
+  var ranged=!!(_distFilter.picked&&(s0||e0));
   var filtered=rows.filter(function(r){
     var ds=r.dateStr;
-    // Hide future dates (compare against today)
-    if(/^\d{4}-\d{2}-\d{2}/.test(ds)&&ds>todayStr)return false;
+    if(!ranged&&/^\d{4}-\d{2}-\d{2}/.test(ds)&&ds>todayStr)return false;
     var rd=new Date(ds.substring(0,10)+'T00:00:00');
     if(s0&&rd<s0)return false;
     if(e0&&rd>e0)return false;
     return true;
   });
+  if(s0&&e0&&_distFilter.picked){
+    var have={};
+    filtered.forEach(function(r){ have[String(r.dateStr).substring(0,10)]=true; });
+    var zeros=hdrs.map(function(){return 0;});
+    for(var dd=new Date(s0); dd<=e0; dd.setDate(dd.getDate()+1)){
+      var iso=dd.getFullYear()+'-'+_p2(dd.getMonth()+1)+'-'+_p2(dd.getDate());
+      if(!have[iso]) filtered.push({dateStr:iso,values:zeros.slice(),sheetRow:0,isNew:true});
+    }
+  }
   var sorted=filtered.slice().sort(function(a,b){return b.dateStr.localeCompare(a.dateStr);});
   var badge=document.getElementById('districtDelivBadge');
   if(badge)badge.textContent=sorted.length+(sorted.length===1?' row':' rows');
@@ -4628,12 +4644,13 @@ function renderDistrictDeliveries(distData){
     return'<tr>'
       +'<td class="cat" style="white-space:nowrap">'
         +((hasShifts||hasNote)?'<button class="dd-toggle" title="Show shift split and notes" onclick="_ddToggle(this,\''+ds10+'\','+(hdrs.length+2)+')">▸</button> ':'')
-        +_fmtDistDate(r.dateStr)+(hasNote?' <span title="has a note">💬</span>':'')+'</td>'
+        +_fmtDistDate(r.dateStr)+(hasNote?' <span title="has a note">💬</span>':'')
+        +(r.isNew?' <span class="dd-pending" title="No row on the sheet yet — saving creates one">to fill</span>':'')+'</td>'
       +r.values.map(function(v,i){
           var isTot=hdrs[i]&&hdrs[i].toLowerCase().indexOf('total')>-1;
           return'<td class="mn"'+(isTot?' style="font-weight:700"':'')+'>'+( v>0?v.toLocaleString():'—')+'</td>';
         }).join('')
-      +'<td><button class="edit-btn" onclick="openEditDistrictRow('+r.sheetRow+',\''+r.dateStr.replace(/'/g,"\\'")+'\')">✏️</button></td>'
+      +'<td><button class="edit-btn" onclick="openEditDistrictRow('+r.sheetRow+',\''+ds10+'\')">✏️</button></td>'
       +'</tr>';
   }).join('')||'<tr><td colspan="'+(hdrs.length+2)+'" style="text-align:center;color:var(--lt);padding:20px">No data for selected range.</td></tr>';
   var tot=document.getElementById('districtDelivTot');
@@ -4740,17 +4757,24 @@ function openEditDistrictRow(sheetRow, dateStr){
   var distData=DATA.districtDel||{};
   var hdrs=distData.headers||[];
   var rows=distData.rows||[];
+  var ds10=String(dateStr).substring(0,10);
   var rowData=null;
-  for(var i=0;i<rows.length;i++){if(rows[i].sheetRow===sheetRow){rowData=rows[i];break;}}
-  if(!rowData)return;
+  for(var i=0;i<rows.length;i++){
+    if(String(rows[i].dateStr).substring(0,10)===ds10){rowData=rows[i];break;}
+  }
+  // A day with nothing on the sheet yet opens empty; saving creates its row.
+  if(!rowData) rowData={dateStr:ds10,values:hdrs.map(function(){return 0;}),sheetRow:0};
   var districts=_dsDistricts();
   var rec=_dsRecord(dateStr);
-  _editDistrictData={sheetRow:sheetRow,dateStr:String(dateStr).substring(0,10),
+  var isNew=!(rowData.sheetRow>0);
+  _editDistrictData={sheetRow:rowData.sheetRow||0,dateStr:ds10,
                      headers:hdrs,districts:districts,values:rowData.values.slice()};
 
-  document.getElementById('editDistrictTitle').textContent='✏️ Edit — '+_fmtDistDate(dateStr);
-  document.getElementById('editDistrictSub').textContent=
-    'Each district is the sum of its three shifts · district totals are written back to DISTRICT DELIVERIES';
+  document.getElementById('editDistrictTitle').textContent=
+    (isNew?'➕ Add — ':'✏️ Edit — ')+_fmtDistDate(dateStr);
+  document.getElementById('editDistrictSub').textContent=isNew
+    ? 'This day has no row on DISTRICT DELIVERIES yet — saving creates one'
+    : 'Each district is the sum of its three shifts · district totals are written back to DISTRICT DELIVERIES';
 
   var html='';
   districts.forEach(function(d,di){
@@ -5015,7 +5039,7 @@ function refreshData(){
   // 5-second hard timeout — stop spinner even if GAS hasn't responded
   var _rTimeout=setTimeout(function(){
     if(_refreshPending){_refreshPending=false;_setRefreshBtn(false);}
-  },5000);
+  },20000);
   // Parallel refresh — same 4 phase calls as init()
   var _rp={cap:null,fin:null,staff:null,ops:null};
   function _rMerge(){
@@ -5057,10 +5081,12 @@ function refreshData(){
   }
   function _rFail(err){ clearTimeout(_rTimeout);_refreshPending=false;_setRefreshBtn(false);console.error('Refresh error:',err); }
 
-  google.script.run.withSuccessHandler(function(r){_rp.cap=r;_rMerge();}).withFailureHandler(_rFail).getCapacityPageData();
-  google.script.run.withSuccessHandler(function(r){_rp.fin=r;_rMerge();}).withFailureHandler(_rFail).getFinancialComplaintsData();
-  google.script.run.withSuccessHandler(function(r){_rp.staff=r;_rMerge();}).withFailureHandler(_rFail).getStaffPageData();
-  google.script.run.withSuccessHandler(function(r){_rp.ops=r;_rMerge();}).withFailureHandler(_rFail).getOperationOverviewData();
+  // force=true: Refresh has to read the sheets, not the 5-minute server cache,
+  // or a row typed straight into the sheet would not appear until it expired.
+  google.script.run.withSuccessHandler(function(r){_rp.cap=r;_rMerge();}).withFailureHandler(_rFail).getCapacityPageData(true);
+  google.script.run.withSuccessHandler(function(r){_rp.fin=r;_rMerge();}).withFailureHandler(_rFail).getFinancialComplaintsData(true);
+  google.script.run.withSuccessHandler(function(r){_rp.staff=r;_rMerge();}).withFailureHandler(_rFail).getStaffPageData(true);
+  google.script.run.withSuccessHandler(function(r){_rp.ops=r;_rMerge();}).withFailureHandler(_rFail).getOperationOverviewData(true);
 }
 
 function _startAutoRefresh(){
@@ -5857,6 +5883,7 @@ function init(){
 
   // Step 1: render cached data instantly (0 ms wait for user)
   var cached = _lcLoad();
+  var _haveCached = !!cached;
   if(cached){
     _applyData(cached);
     document.getElementById('loadingTxt').textContent='Refreshing data…';
@@ -5864,10 +5891,20 @@ function init(){
     loadFallbackData();
     document.getElementById('loadingTxt').textContent='Loading data…';
   }
-  if(_loggedIn) document.getElementById('loadingOverlay').classList.remove('hidden');
+  // The overlay used to sit there until all four phases returned, so a cached
+  // page that was already fully drawn still looked like it was loading. With
+  // something real on screen the refresh belongs in the background.
+  if(_loggedIn && !_haveCached) document.getElementById('loadingOverlay').classList.remove('hidden');
+  if(_haveCached) _setRefreshBtn(true);
 
   // Step 2: fire all 4 phase loaders in parallel
   var _phases = {cap:null, fin:null, staff:null, ops:null};
+  // The landing page is Operation Overview, so once its phase lands there is
+  // nothing left for the overlay to hide — the rest fills in behind it.
+  function _uncover(){
+    var o=document.getElementById('loadingOverlay');
+    if(o) o.classList.add('hidden');
+  }
   function _tryMerge(){
     if(!_phases.cap||!_phases.fin||!_phases.staff||!_phases.ops) return;
     var result = {
@@ -5885,7 +5922,8 @@ function init(){
     };
     _applyData(result);
     _lcSave(result);
-    document.getElementById('loadingOverlay').classList.add('hidden');
+    _uncover();
+    _setRefreshBtn(false);
     _lastRefresh = new Date();
     _startAutoRefresh();
   }
@@ -5912,7 +5950,11 @@ function init(){
     .getStaffPageData();
 
   google.script.run
-    .withSuccessHandler(function(r){ _phases.ops=r; _tryMerge(); })
+    .withSuccessHandler(function(r){
+      _phases.ops=r;
+      if(r&&!_haveCached){ DATA.opsOverview=r; renderOperationOverview(r); _uncover(); }
+      _tryMerge();
+    })
     .withFailureHandler(_fail('ops'))
     .getOperationOverviewData();
 }

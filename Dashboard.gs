@@ -32,28 +32,73 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-08-19.b';
+var UMP_BUILD    = '2026-08-19.c';
 var _CACHE_TTL   = 300; // seconds (5 min)
+
+// A cache entry is capped at ~100 KB, and the page payloads outgrew that: the
+// old code simply skipped caching anything larger, so the biggest phase — the
+// one worth caching most — was rebuilt from the sheets on every single load.
+// Long values are now split across numbered chunks, with the head written last
+// so a half-written set can never be read back.
+var _CACHE_CHUNK  = 90000;
+var _CACHE_MAXCHU = 12;          // ≈1 MB ceiling; past that, don't cache
+
+function _cacheGet_(key) {
+  try {
+    var c = CacheService.getScriptCache();
+    var head = c.get(key);
+    if (!head) return null;
+    if (head.charAt(0) !== '#') return JSON.parse(head);
+    var n = parseInt(head.substring(1), 10);
+    var ids = [];
+    for (var i = 0; i < n; i++) ids.push(key + '~' + i);
+    var got = c.getAll(ids) || {};
+    var s = '';
+    for (var j = 0; j < n; j++) {
+      var part = got[key + '~' + j];
+      if (part === undefined || part === null) return null;  // expired mid-set
+      s += part;
+    }
+    return JSON.parse(s);
+  } catch(e) { return null; }
+}
+
+function _cachePut_(key, obj) {
+  try {
+    var c = CacheService.getScriptCache();
+    var json = JSON.stringify(obj);
+    if (json.length <= _CACHE_CHUNK) { c.put(key, json, _CACHE_TTL); return; }
+    var n = Math.ceil(json.length / _CACHE_CHUNK);
+    if (n > _CACHE_MAXCHU) return;
+    var m = {};
+    for (var i = 0; i < n; i++) m[key + '~' + i] = json.substr(i * _CACHE_CHUNK, _CACHE_CHUNK);
+    c.putAll(m, _CACHE_TTL);
+    c.put(key, '#' + n, _CACHE_TTL);   // head last
+  } catch(e) {}
+}
 
 function _invalidateCache() {
   try {
     var c = CacheService.getScriptCache();
-    c.remove(_CACHE_CAP);
-    c.remove(_CACHE_FIN);
-    c.remove(_CACHE_STAFF);
-    c.remove(_CACHE_OPS);
-    c.remove(_CACHE_INV);
+    var keys = [_CACHE_CAP, _CACHE_FIN, _CACHE_STAFF, _CACHE_OPS, _CACHE_INV];
+    var all = [];
+    keys.forEach(function(k) {
+      all.push(k);
+      for (var i = 0; i < _CACHE_MAXCHU; i++) all.push(k + '~' + i);
+    });
+    c.removeAll(all);
   } catch(e) {}
 }
 
 // ── Phase 1: Capacity page (SS_COMPLAINTS only) ───────────────
 // Typical time: 3–5 s on first call, <0.5 s on cache hit
-function getCapacityPageData() {
-  var cache = CacheService.getScriptCache();
-  try {
-    var hit = cache.get(_CACHE_CAP);
-    if (hit) return JSON.parse(hit);
-  } catch(e) {}
+function getCapacityPageData(force) {
+  // force skips the cache: pressing Refresh must show sheet edits made
+  // in the last few minutes, not whatever was cached before them.
+  if (!force) {
+    var hit = _cacheGet_(_CACHE_CAP);
+    if (hit) return hit;
+  }
 
   var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
   var data = {
@@ -65,20 +110,18 @@ function getCapacityPageData() {
     districtDel: getDistrictDeliveriesData(ss),
     districtShifts: getDistrictShiftData(ss)
   };
-  try {
-    var json = JSON.stringify(data);
-    if (json.length <= 90000) cache.put(_CACHE_CAP, json, _CACHE_TTL);
-  } catch(e) {}
+  _cachePut_(_CACHE_CAP, data);
   return data;
 }
 
 // ── Phase 2: Financial + Complaints (SS_FINANCIAL + SS_COMPLAINTS) ──
-function getFinancialComplaintsData() {
-  var cache = CacheService.getScriptCache();
-  try {
-    var hit = cache.get(_CACHE_FIN);
-    if (hit) return JSON.parse(hit);
-  } catch(e) {}
+function getFinancialComplaintsData(force) {
+  // force skips the cache: pressing Refresh must show sheet edits made
+  // in the last few minutes, not whatever was cached before them.
+  if (!force) {
+    var hit = _cacheGet_(_CACHE_FIN);
+    if (hit) return hit;
+  }
 
   var ssF = SpreadsheetApp.openById(SS_FINANCIAL);
   var ssC = SpreadsheetApp.openById(SS_COMPLAINTS);
@@ -86,40 +129,36 @@ function getFinancialComplaintsData() {
     financial:  getFinancialData(ssF),
     complaints: getComplaintsData(ssC)
   };
-  try {
-    var json = JSON.stringify(data);
-    if (json.length <= 90000) cache.put(_CACHE_FIN, json, _CACHE_TTL);
-  } catch(e) {}
+  _cachePut_(_CACHE_FIN, data);
   return data;
 }
 
 // ── Phase 3: Staff (SS_STAFF only) ───────────────────────────
-function getStaffPageData() {
-  var cache = CacheService.getScriptCache();
-  try {
-    var hit = cache.get(_CACHE_STAFF);
-    if (hit) return JSON.parse(hit);
-  } catch(e) {}
+function getStaffPageData(force) {
+  // force skips the cache: pressing Refresh must show sheet edits made
+  // in the last few minutes, not whatever was cached before them.
+  if (!force) {
+    var hit = _cacheGet_(_CACHE_STAFF);
+    if (hit) return hit;
+  }
 
   var ss = SpreadsheetApp.openById(SS_STAFF);
   var data = {
     staff:        getStaffData(ss),
     staffSummary: getStaffSummaryData(ss)
   };
-  try {
-    var json = JSON.stringify(data);
-    if (json.length <= 90000) cache.put(_CACHE_STAFF, json, _CACHE_TTL);
-  } catch(e) {}
+  _cachePut_(_CACHE_STAFF, data);
   return data;
 }
 
 // ── Phase 4: Operation Overview (SS_COMPLAINTS + SS_STAFF) ───
-function getOperationOverviewData() {
-  var cache = CacheService.getScriptCache();
-  try {
-    var hit = cache.get(_CACHE_OPS);
-    if (hit) return JSON.parse(hit);
-  } catch(e) {}
+function getOperationOverviewData(force) {
+  // force skips the cache: pressing Refresh must show sheet edits made
+  // in the last few minutes, not whatever was cached before them.
+  if (!force) {
+    var hit = _cacheGet_(_CACHE_OPS);
+    if (hit) return hit;
+  }
 
   var ssC = SpreadsheetApp.openById(SS_COMPLAINTS);
   var ssS = SpreadsheetApp.openById(SS_STAFF);
@@ -205,10 +244,7 @@ function getOperationOverviewData() {
     logisticsMeta:      _logisticsData.meta || null
   };
 
-  try {
-    var json = JSON.stringify(data);
-    if (json.length <= 90000) cache.put(_CACHE_OPS, json, _CACHE_TTL);
-  } catch(e) {}
+  _cachePut_(_CACHE_OPS, data);
   return data;
 }
 
@@ -2025,12 +2061,11 @@ function deleteLogisticsInvoice(id, supplier, invoiceNo) {
 }
 
 // Grouped back into invoices for the page.
-function getLogisticsInvoiceData() {
-  var cache = CacheService.getScriptCache();
-  try {
-    var hit = cache.get(_CACHE_INV);
-    if (hit) return JSON.parse(hit);
-  } catch (e) {}
+function getLogisticsInvoiceData(force) {
+  if (!force) {
+    var hit = _cacheGet_(_CACHE_INV);
+    if (hit) return hit;
+  }
   try {
     var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
     var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
@@ -2078,10 +2113,7 @@ function getLogisticsInvoiceData() {
       return v;
     });
     var payload = { invoices: out, build: UMP_BUILD };
-    try {
-      var j = JSON.stringify(payload);
-      if (j.length <= 90000) cache.put(_CACHE_INV, j, _CACHE_TTL);
-    } catch (e) {}
+    _cachePut_(_CACHE_INV, payload);
     return payload;
   } catch (e) { return { invoices: [], error: e.message }; }
 }
@@ -2331,32 +2363,72 @@ function saveDistrictShiftRow(payload) {
       lay.notesCol = at - 1;
     }
 
-    var mirrored = 0;
-    if (payload.sheetRow) {
-      var dd = ss.getSheetByName('DISTRICT DELIVERIES');
-      if (dd) {
-        var ddHdr = dd.getRange(1, 1, 1, Math.max(dd.getLastColumn(), 1)).getValues()[0];
-        for (var t = 0; t < totals.length; t++) {
-          if (!totals[t].touched && totals[t].total === 0) continue;
-          for (var c3 = 1; c3 < ddHdr.length; c3++) {
-            if (_shiftKey_(ddHdr[c3]) === _shiftKey_(totals[t].district)) {
-              dd.getRange(payload.sheetRow, c3 + 1).setValue(totals[t].total);
-              mirrored++;
-              break;
-            }
+    var mirrored = 0, ddRow = 0;
+    var dd = ss.getSheetByName('DISTRICT DELIVERIES');
+    if (dd) {
+      // A day being planned ahead has no row yet, so make one. The row is
+      // located by date rather than trusting the caller's row number, which
+      // goes stale as soon as anything is inserted on the sheet.
+      ddRow = _ensureDistrictDeliveryRow_(dd, payload.dateStr);
+      var ddHdr = dd.getRange(1, 1, 1, Math.max(dd.getLastColumn(), 1)).getValues()[0];
+      for (var t = 0; t < totals.length; t++) {
+        if (!totals[t].touched && totals[t].total === 0) continue;
+        for (var c3 = 1; c3 < ddHdr.length; c3++) {
+          if (_shiftKey_(ddHdr[c3]) === _shiftKey_(totals[t].district)) {
+            dd.getRange(ddRow, c3 + 1).setValue(totals[t].total);
+            mirrored++;
+            break;
           }
         }
       }
+      if (mirrored) _ddSyncTotal_(dd, ddRow, ddHdr);
     }
 
     SpreadsheetApp.flush();
     _invalidateCache();
-    return { ok: true, totals: totals, mirrored: mirrored, row: target,
+    return { ok: true, totals: totals, mirrored: mirrored, row: target, ddRow: ddRow,
              layout: lay.twoRow ? 'two-row' : 'single-row',
              unmatched: unmatched.slice(0, 8), unmatchedCount: unmatched.length };
   } catch (e) {
     return { ok: false, error: e.message };
   }
+}
+
+// Row number on DISTRICT DELIVERIES for a date, creating it if the day has no
+// row yet. A day being planned ahead has no row, so one is appended.
+function _ensureDistrictDeliveryRow_(dd, dateStr) {
+  var all = dd.getDataRange().getValues();
+  for (var r = 1; r < all.length; r++) {
+    if (_normDateStr_(all[r][0]) === dateStr) return r + 1;
+  }
+  var parts = dateStr.split('-');
+  var d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+  var row = dd.getLastRow() + 1;
+  dd.getRange(row, 1).setValue(d);
+  return row;
+}
+
+// Keeps the Total column honest after district values change. A Total held as
+// a formula is left alone — and copied down for a brand new row — so whatever
+// the sheet already does keeps working.
+function _ddSyncTotal_(dd, row, ddHdr) {
+  try {
+    var totCol = -1;
+    for (var c = 1; c < ddHdr.length; c++) {
+      if (String(ddHdr[c] || '').trim().toLowerCase() === 'total') { totCol = c + 1; break; }
+    }
+    if (totCol < 0) return;
+    var cell = dd.getRange(row, totCol);
+    if (cell.getFormula()) return;                       // the sheet computes it
+    if (row > 2) {
+      var above = dd.getRange(row - 1, totCol);
+      if (above.getFormula()) { above.copyTo(cell); return; }
+    }
+    var vals = dd.getRange(row, 2, 1, totCol - 2).getValues()[0];
+    var sum = 0;
+    for (var i = 0; i < vals.length; i++) sum += safeNum(vals[i]);
+    cell.setValue(sum);
+  } catch (e) {}
 }
 
 // WRITE-BACK — update a DISTRICT DELIVERIES row
