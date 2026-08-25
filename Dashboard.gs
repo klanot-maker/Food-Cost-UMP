@@ -32,7 +32,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-08-19.d';
+var UMP_BUILD    = '2026-08-25.a';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 // A cache entry is capped at ~100 KB, and the page payloads outgrew that: the
@@ -40,6 +40,62 @@ var _CACHE_TTL   = 300; // seconds (5 min)
 // one worth caching most — was rebuilt from the sheets on every single load.
 // Long values are now split across numbered chunks, with the head written last
 // so a half-written set can never be read back.
+// Cache keys carry two markers, because a cached payload can go out of date two
+// different ways and only one of them was being caught.
+//
+//   generation — bumped whenever the dashboard itself writes to a sheet.
+//   source stamp — when each source spreadsheet was last modified.
+//
+// The generation covers edits made through the dashboard. The stamp covers
+// edits typed straight into the sheet, which nothing here could previously
+// notice: add a row to Financial cost and the page kept serving the payload it
+// built before that row existed, for the life of the entry. Folding the
+// modified time into the key means an edit produces a different key, so the
+// stale entry is simply never looked up again.
+var _GEN_KEY = 'ump_gen';
+var _GEN_TTL = 21600;            // 6 h
+var _stampMemo = {};             // per-execution, so Drive is asked once per file
+
+function _gen_() {
+  try {
+    var c = CacheService.getScriptCache();
+    var g = c.get(_GEN_KEY);
+    if (!g) { g = '1'; c.put(_GEN_KEY, g, _GEN_TTL); }
+    return g;
+  } catch (e) { return '0'; }
+}
+
+function _bumpGen_() {
+  try {
+    var c = CacheService.getScriptCache();
+    c.put(_GEN_KEY, String((parseInt(c.get(_GEN_KEY) || '1', 10) + 1)), _GEN_TTL);
+  } catch (e) {}
+}
+
+// Minute resolution: enough to notice an edit, coarse enough that the key stays
+// stable while someone is reading the page.
+function _srcStamp_(ids) {
+  var out = [];
+  for (var i = 0; i < ids.length; i++) {
+    var id = ids[i];
+    if (_stampMemo[id] === undefined) {
+      try {
+        _stampMemo[id] = String(Math.floor(DriveApp.getFileById(id).getLastUpdated().getTime() / 60000));
+      } catch (e) { _stampMemo[id] = ''; }
+    }
+    if (!_stampMemo[id]) return '';        // could not read one — fall back
+    out.push(_stampMemo[id]);
+  }
+  return out.join('.');
+}
+
+// Falls back to the bare key if Drive cannot be reached, so a Drive hiccup
+// costs freshness, never correctness.
+function _srcKey_(base, ids) {
+  var st = _srcStamp_(ids);
+  return base + '@' + _gen_() + (st ? '@' + st : '');
+}
+
 var _CACHE_CHUNK  = 90000;
 var _CACHE_MAXCHU = 12;          // ≈1 MB ceiling; past that, don't cache
 
@@ -78,6 +134,8 @@ function _cachePut_(key, obj) {
 }
 
 function _invalidateCache() {
+  _bumpGen_();                    // every stamped key is now unreachable
+  _stampMemo = {};
   try {
     var c = CacheService.getScriptCache();
     var keys = [_CACHE_CAP, _CACHE_FIN, _CACHE_STAFF, _CACHE_OPS, _CACHE_INV];
@@ -95,8 +153,9 @@ function _invalidateCache() {
 function getCapacityPageData(force) {
   // force skips the cache: pressing Refresh must show sheet edits made
   // in the last few minutes, not whatever was cached before them.
+  var _ck = _srcKey_(_CACHE_CAP, [SS_COMPLAINTS]);
   if (!force) {
-    var hit = _cacheGet_(_CACHE_CAP);
+    var hit = _cacheGet_(_ck);
     if (hit) return hit;
   }
 
@@ -110,7 +169,7 @@ function getCapacityPageData(force) {
     districtDel: getDistrictDeliveriesData(ss),
     districtShifts: getDistrictShiftData(ss)
   };
-  _cachePut_(_CACHE_CAP, data);
+  _cachePut_(_ck, data);
   return data;
 }
 
@@ -118,8 +177,9 @@ function getCapacityPageData(force) {
 function getFinancialComplaintsData(force) {
   // force skips the cache: pressing Refresh must show sheet edits made
   // in the last few minutes, not whatever was cached before them.
+  var _ck = _srcKey_(_CACHE_FIN, [SS_FINANCIAL, SS_COMPLAINTS]);
   if (!force) {
-    var hit = _cacheGet_(_CACHE_FIN);
+    var hit = _cacheGet_(_ck);
     if (hit) return hit;
   }
 
@@ -129,7 +189,7 @@ function getFinancialComplaintsData(force) {
     financial:  getFinancialData(ssF),
     complaints: getComplaintsData(ssC)
   };
-  _cachePut_(_CACHE_FIN, data);
+  _cachePut_(_ck, data);
   return data;
 }
 
@@ -137,8 +197,9 @@ function getFinancialComplaintsData(force) {
 function getStaffPageData(force) {
   // force skips the cache: pressing Refresh must show sheet edits made
   // in the last few minutes, not whatever was cached before them.
+  var _ck = _srcKey_(_CACHE_STAFF, [SS_STAFF]);
   if (!force) {
-    var hit = _cacheGet_(_CACHE_STAFF);
+    var hit = _cacheGet_(_ck);
     if (hit) return hit;
   }
 
@@ -147,7 +208,7 @@ function getStaffPageData(force) {
     staff:        getStaffData(ss),
     staffSummary: getStaffSummaryData(ss)
   };
-  _cachePut_(_CACHE_STAFF, data);
+  _cachePut_(_ck, data);
   return data;
 }
 
@@ -155,8 +216,9 @@ function getStaffPageData(force) {
 function getOperationOverviewData(force) {
   // force skips the cache: pressing Refresh must show sheet edits made
   // in the last few minutes, not whatever was cached before them.
+  var _ck = _srcKey_(_CACHE_OPS, [SS_COMPLAINTS, SS_STAFF]);
   if (!force) {
-    var hit = _cacheGet_(_CACHE_OPS);
+    var hit = _cacheGet_(_ck);
     if (hit) return hit;
   }
 
@@ -244,7 +306,7 @@ function getOperationOverviewData(force) {
     logisticsMeta:      _logisticsData.meta || null
   };
 
-  _cachePut_(_CACHE_OPS, data);
+  _cachePut_(_ck, data);
   return data;
 }
 
@@ -461,8 +523,13 @@ function getFinancialData(ss) {
 
       if (!wasteDone && lblL === 'wastages')         { inWaste = true;  inOther = false; continue; }
       if (lblL.indexOf('other food cost') > -1)      { inOther = true;  inWaste = false; continue; }
-      if (lblL.indexOf('total wastage') > -1)        { inWaste = false; wasteDone = true; continue; }
-      if (lblL.indexOf('total other') > -1)          { inOther = false; continue; }
+      // A total closes whichever section is open, not just the one its wording
+      // names. The sheet labels the Other Food Cost total "Total Wastage &
+      // Spoiled Items" too, and closing only the wastage section left Other
+      // open — so anything added below that row would have been swept into it.
+      if (lblL.indexOf('total wastage') > -1)        { inWaste = false; inOther = false; wasteDone = true; continue; }
+      if (lblL.indexOf('total other') > -1)          { inWaste = false; inOther = false; continue; }
+      if (/^total\b/.test(lblL))                     { inWaste = false; inOther = false; continue; }
       if (lblL === 'category' || lblL === 'subtotal' || lblL === 'total') continue;
 
       if (!inWaste && !inOther) {
@@ -2062,8 +2129,9 @@ function deleteLogisticsInvoice(id, supplier, invoiceNo) {
 
 // Grouped back into invoices for the page.
 function getLogisticsInvoiceData(force) {
+  var _ck = _srcKey_(_CACHE_INV, [SS_COMPLAINTS]);
   if (!force) {
-    var hit = _cacheGet_(_CACHE_INV);
+    var hit = _cacheGet_(_ck);
     if (hit) return hit;
   }
   try {
@@ -2113,7 +2181,7 @@ function getLogisticsInvoiceData(force) {
       return v;
     });
     var payload = { invoices: out, build: UMP_BUILD };
-    _cachePut_(_CACHE_INV, payload);
+    _cachePut_(_ck, payload);
     return payload;
   } catch (e) { return { invoices: [], error: e.message }; }
 }
