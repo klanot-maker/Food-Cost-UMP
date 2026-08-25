@@ -25,27 +25,139 @@ const GID_DOD_COMPLAINT = 1747363719;
 var _CACHE_CAP   = 'ump_cap_v1';
 var _CACHE_FIN   = 'ump_fin_v1';
 var _CACHE_STAFF = 'ump_staff_v1';
-var _CACHE_OPS   = 'ump_ops_v1';
+// Bumped to v2: the ops payload now carries logistics cost fields, so any
+// payload cached under the old key has the wrong shape and must be dropped.
+var _CACHE_OPS   = 'ump_ops_v2';
+var _CACHE_INV   = 'ump_loginv_v1';
+// Bumped whenever the invoice reader changes. The page shows it next to its
+// own copy, so a dashboard running an older deployment is obvious at a glance
+// instead of looking like a bug in the data.
+var UMP_BUILD    = '2026-08-25.a';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
-function _invalidateCache() {
+// A cache entry is capped at ~100 KB, and the page payloads outgrew that: the
+// old code simply skipped caching anything larger, so the biggest phase — the
+// one worth caching most — was rebuilt from the sheets on every single load.
+// Long values are now split across numbered chunks, with the head written last
+// so a half-written set can never be read back.
+// Cache keys carry two markers, because a cached payload can go out of date two
+// different ways and only one of them was being caught.
+//
+//   generation — bumped whenever the dashboard itself writes to a sheet.
+//   source stamp — when each source spreadsheet was last modified.
+//
+// The generation covers edits made through the dashboard. The stamp covers
+// edits typed straight into the sheet, which nothing here could previously
+// notice: add a row to Financial cost and the page kept serving the payload it
+// built before that row existed, for the life of the entry. Folding the
+// modified time into the key means an edit produces a different key, so the
+// stale entry is simply never looked up again.
+var _GEN_KEY = 'ump_gen';
+var _GEN_TTL = 21600;            // 6 h
+var _stampMemo = {};             // per-execution, so Drive is asked once per file
+
+function _gen_() {
   try {
     var c = CacheService.getScriptCache();
-    c.remove(_CACHE_CAP);
-    c.remove(_CACHE_FIN);
-    c.remove(_CACHE_STAFF);
-    c.remove(_CACHE_OPS);
+    var g = c.get(_GEN_KEY);
+    if (!g) { g = '1'; c.put(_GEN_KEY, g, _GEN_TTL); }
+    return g;
+  } catch (e) { return '0'; }
+}
+
+function _bumpGen_() {
+  try {
+    var c = CacheService.getScriptCache();
+    c.put(_GEN_KEY, String((parseInt(c.get(_GEN_KEY) || '1', 10) + 1)), _GEN_TTL);
+  } catch (e) {}
+}
+
+// Minute resolution: enough to notice an edit, coarse enough that the key stays
+// stable while someone is reading the page.
+function _srcStamp_(ids) {
+  var out = [];
+  for (var i = 0; i < ids.length; i++) {
+    var id = ids[i];
+    if (_stampMemo[id] === undefined) {
+      try {
+        _stampMemo[id] = String(Math.floor(DriveApp.getFileById(id).getLastUpdated().getTime() / 60000));
+      } catch (e) { _stampMemo[id] = ''; }
+    }
+    if (!_stampMemo[id]) return '';        // could not read one — fall back
+    out.push(_stampMemo[id]);
+  }
+  return out.join('.');
+}
+
+// Falls back to the bare key if Drive cannot be reached, so a Drive hiccup
+// costs freshness, never correctness.
+function _srcKey_(base, ids) {
+  var st = _srcStamp_(ids);
+  return base + '@' + _gen_() + (st ? '@' + st : '');
+}
+
+var _CACHE_CHUNK  = 90000;
+var _CACHE_MAXCHU = 12;          // ≈1 MB ceiling; past that, don't cache
+
+function _cacheGet_(key) {
+  try {
+    var c = CacheService.getScriptCache();
+    var head = c.get(key);
+    if (!head) return null;
+    if (head.charAt(0) !== '#') return JSON.parse(head);
+    var n = parseInt(head.substring(1), 10);
+    var ids = [];
+    for (var i = 0; i < n; i++) ids.push(key + '~' + i);
+    var got = c.getAll(ids) || {};
+    var s = '';
+    for (var j = 0; j < n; j++) {
+      var part = got[key + '~' + j];
+      if (part === undefined || part === null) return null;  // expired mid-set
+      s += part;
+    }
+    return JSON.parse(s);
+  } catch(e) { return null; }
+}
+
+function _cachePut_(key, obj) {
+  try {
+    var c = CacheService.getScriptCache();
+    var json = JSON.stringify(obj);
+    if (json.length <= _CACHE_CHUNK) { c.put(key, json, _CACHE_TTL); return; }
+    var n = Math.ceil(json.length / _CACHE_CHUNK);
+    if (n > _CACHE_MAXCHU) return;
+    var m = {};
+    for (var i = 0; i < n; i++) m[key + '~' + i] = json.substr(i * _CACHE_CHUNK, _CACHE_CHUNK);
+    c.putAll(m, _CACHE_TTL);
+    c.put(key, '#' + n, _CACHE_TTL);   // head last
+  } catch(e) {}
+}
+
+function _invalidateCache() {
+  _bumpGen_();                    // every stamped key is now unreachable
+  _stampMemo = {};
+  try {
+    var c = CacheService.getScriptCache();
+    var keys = [_CACHE_CAP, _CACHE_FIN, _CACHE_STAFF, _CACHE_OPS, _CACHE_INV];
+    var all = [];
+    keys.forEach(function(k) {
+      all.push(k);
+      for (var i = 0; i < _CACHE_MAXCHU; i++) all.push(k + '~' + i);
+    });
+    c.removeAll(all);
   } catch(e) {}
 }
 
 // ── Phase 1: Capacity page (SS_COMPLAINTS only) ───────────────
 // Typical time: 3–5 s on first call, <0.5 s on cache hit
-function getCapacityPageData() {
-  var cache = CacheService.getScriptCache();
-  try {
-    var hit = cache.get(_CACHE_CAP);
-    if (hit) return JSON.parse(hit);
-  } catch(e) {}
+function getCapacityPageData(force) {
+  // force skips the cache: pressing Refresh must show sheet edits made
+  // in the last few minutes, not whatever was cached before them.
+  var _ck = _srcKey_(_CACHE_CAP, [SS_COMPLAINTS]);
+  if (!force) {
+    var hit = _cacheGet_(_ck);
+    if (hit) return hit;
+  }
 
   var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
   var data = {
@@ -54,22 +166,22 @@ function getCapacityPageData() {
     forecast:    getForecastData(ss),
     logistics:   getLogisticsData(ss),
     wowDistrict: getWowDistrictData(ss),
-    districtDel: getDistrictDeliveriesData(ss)
+    districtDel: getDistrictDeliveriesData(ss),
+    districtShifts: getDistrictShiftData(ss)
   };
-  try {
-    var json = JSON.stringify(data);
-    if (json.length <= 90000) cache.put(_CACHE_CAP, json, _CACHE_TTL);
-  } catch(e) {}
+  _cachePut_(_ck, data);
   return data;
 }
 
 // ── Phase 2: Financial + Complaints (SS_FINANCIAL + SS_COMPLAINTS) ──
-function getFinancialComplaintsData() {
-  var cache = CacheService.getScriptCache();
-  try {
-    var hit = cache.get(_CACHE_FIN);
-    if (hit) return JSON.parse(hit);
-  } catch(e) {}
+function getFinancialComplaintsData(force) {
+  // force skips the cache: pressing Refresh must show sheet edits made
+  // in the last few minutes, not whatever was cached before them.
+  var _ck = _srcKey_(_CACHE_FIN, [SS_FINANCIAL, SS_COMPLAINTS]);
+  if (!force) {
+    var hit = _cacheGet_(_ck);
+    if (hit) return hit;
+  }
 
   var ssF = SpreadsheetApp.openById(SS_FINANCIAL);
   var ssC = SpreadsheetApp.openById(SS_COMPLAINTS);
@@ -77,40 +189,38 @@ function getFinancialComplaintsData() {
     financial:  getFinancialData(ssF),
     complaints: getComplaintsData(ssC)
   };
-  try {
-    var json = JSON.stringify(data);
-    if (json.length <= 90000) cache.put(_CACHE_FIN, json, _CACHE_TTL);
-  } catch(e) {}
+  _cachePut_(_ck, data);
   return data;
 }
 
 // ── Phase 3: Staff (SS_STAFF only) ───────────────────────────
-function getStaffPageData() {
-  var cache = CacheService.getScriptCache();
-  try {
-    var hit = cache.get(_CACHE_STAFF);
-    if (hit) return JSON.parse(hit);
-  } catch(e) {}
+function getStaffPageData(force) {
+  // force skips the cache: pressing Refresh must show sheet edits made
+  // in the last few minutes, not whatever was cached before them.
+  var _ck = _srcKey_(_CACHE_STAFF, [SS_STAFF]);
+  if (!force) {
+    var hit = _cacheGet_(_ck);
+    if (hit) return hit;
+  }
 
   var ss = SpreadsheetApp.openById(SS_STAFF);
   var data = {
     staff:        getStaffData(ss),
     staffSummary: getStaffSummaryData(ss)
   };
-  try {
-    var json = JSON.stringify(data);
-    if (json.length <= 90000) cache.put(_CACHE_STAFF, json, _CACHE_TTL);
-  } catch(e) {}
+  _cachePut_(_ck, data);
   return data;
 }
 
 // ── Phase 4: Operation Overview (SS_COMPLAINTS + SS_STAFF) ───
-function getOperationOverviewData() {
-  var cache = CacheService.getScriptCache();
-  try {
-    var hit = cache.get(_CACHE_OPS);
-    if (hit) return JSON.parse(hit);
-  } catch(e) {}
+function getOperationOverviewData(force) {
+  // force skips the cache: pressing Refresh must show sheet edits made
+  // in the last few minutes, not whatever was cached before them.
+  var _ck = _srcKey_(_CACHE_OPS, [SS_COMPLAINTS, SS_STAFF]);
+  if (!force) {
+    var hit = _cacheGet_(_ck);
+    if (hit) return hit;
+  }
 
   var ssC = SpreadsheetApp.openById(SS_COMPLAINTS);
   var ssS = SpreadsheetApp.openById(SS_STAFF);
@@ -178,6 +288,8 @@ function getOperationOverviewData() {
     todayDod = sorted[0];
   }
 
+  var _logisticsData = getLogisticsStaffData(ssC) || {};
+
   var data = {
     todayDeliveries:    delivByDate[ds1] || 0,
     todayDate:          ds1,
@@ -190,13 +302,11 @@ function getOperationOverviewData() {
     dodComplaintsDate:  todayDod ? (todayDod.dateStr || todayStr) : todayStr,
     dodAllRecords:      dodData.records || [],
     dodHeaders:         dodData.headers || [],
-    logisticsRows:      getLogisticsStaffData(ssC).rows || []
+    logisticsRows:      _logisticsData.rows || [],
+    logisticsMeta:      _logisticsData.meta || null
   };
 
-  try {
-    var json = JSON.stringify(data);
-    if (json.length <= 90000) cache.put(_CACHE_OPS, json, _CACHE_TTL);
-  } catch(e) {}
+  _cachePut_(_ck, data);
   return data;
 }
 
@@ -363,6 +473,7 @@ function getAllData() {
     logistics:    cap.logistics,
     wowDistrict:  cap.wowDistrict,
     districtDel:  cap.districtDel,
+    districtShifts: cap.districtShifts,
     opsOverview:  ops
   };
 }
@@ -412,8 +523,13 @@ function getFinancialData(ss) {
 
       if (!wasteDone && lblL === 'wastages')         { inWaste = true;  inOther = false; continue; }
       if (lblL.indexOf('other food cost') > -1)      { inOther = true;  inWaste = false; continue; }
-      if (lblL.indexOf('total wastage') > -1)        { inWaste = false; wasteDone = true; continue; }
-      if (lblL.indexOf('total other') > -1)          { inOther = false; continue; }
+      // A total closes whichever section is open, not just the one its wording
+      // names. The sheet labels the Other Food Cost total "Total Wastage &
+      // Spoiled Items" too, and closing only the wastage section left Other
+      // open — so anything added below that row would have been swept into it.
+      if (lblL.indexOf('total wastage') > -1)        { inWaste = false; inOther = false; wasteDone = true; continue; }
+      if (lblL.indexOf('total other') > -1)          { inWaste = false; inOther = false; continue; }
+      if (/^total\b/.test(lblL))                     { inWaste = false; inOther = false; continue; }
       if (lblL === 'category' || lblL === 'subtotal' || lblL === 'total') continue;
 
       if (!inWaste && !inOther) {
@@ -1268,8 +1384,13 @@ function getLogisticsData(ss) {
 
 // ════════════════════════════════════════════════════════════
 // LOGISTICS STAFF — "Logistics" sheet in SS_COMPLAINTS
-// Row 1 = headers; Col A=Delivery Date, B=Chiller Van, C=3 Ton Truck,
-// D=Truck Driver, E=Cafe Van, F=Helper, G=Total Staff
+// Row 1 = headers; Col A=Date, B=Vans, C=3 Ton Truck, D=Truck Driver,
+// E=Cafe Van, F=Helper, G=Supply Chain Truck, H=Total Staff, I=Delivery
+//
+// Columns are resolved by reading the header row rather than by fixed
+// position, so inserting or reordering a column in the sheet no longer
+// silently feeds the wrong figure to a tile. The positional defaults
+// below are only used if a header cannot be matched.
 // ════════════════════════════════════════════════════════════
 function getLogisticsStaffData(ss) {
   try {
@@ -1278,6 +1399,33 @@ function getLogisticsStaffData(ss) {
     if (!sheet) return { rows: [] };
     var all = sheet.getDataRange().getValues();
     if (all.length < 2) return { rows: [] };
+
+    // Match each output field to its column by header name.
+    var HEADER_MAP = [
+      { key: 'chillerVan',       fallback: 1, names: ['vans','van','chiller van','chiller vans'] },
+      { key: 'truck3ton',        fallback: 2, names: ['3 ton truck','3 ton trucks','3ton truck','three ton truck'] },
+      { key: 'truckDriver',      fallback: 3, names: ['truck driver','truck drivers'] },
+      { key: 'cafeVan',          fallback: 4, names: ['cafe van','cafe vans','café van'] },
+      { key: 'helper',           fallback: 5, names: ['helper','helpers'] },
+      { key: 'supplyChainTruck', fallback: 6, names: ['supply chain truck','supply chain trucks','supplychain truck'] },
+      { key: 'totalStaff',       fallback: 7, names: ['total staff','total staffs'] },
+      { key: 'delivery',         fallback: 8, names: ['delivery','deliveries','total delivery','total deliveries'] },
+      // Cost columns (K–M) feed the Logistics cost page.
+      { key: 'vanCost',          fallback: 10, names: ['van cost','vans cost','van costs'] },
+      { key: 'truckCost',        fallback: 11, names: ['truck cost','trucks cost','truck costs'] },
+      { key: 'helperCost',       fallback: 12, names: ['helper cost','helpers cost','helper costs'] }
+    ];
+    var normHdr = function(v){ return String(v == null ? '' : v).trim().replace(/\s+/g,' ').toLowerCase(); };
+    var hdr = (all[0] || []).map(normHdr);
+    var colOf = {};
+    HEADER_MAP.forEach(function(f){
+      var idx = -1;
+      for (var i = 0; i < hdr.length; i++) {
+        if (hdr[i] && f.names.indexOf(hdr[i]) !== -1) { idx = i; break; }
+      }
+      colOf[f.key] = (idx !== -1) ? idx : f.fallback;
+    });
+
     var rows = [];
     for (var r = 1; r < all.length; r++) {
       var dv = all[r][0];
@@ -1291,17 +1439,751 @@ function getLogisticsStaffData(ss) {
       }
       if (!ds) continue;
       rows.push({
-        ds:          ds,
-        chillerVan:  safeNum(all[r][1]),
-        truck3ton:   safeNum(all[r][2]),
-        truckDriver: safeNum(all[r][3]),
-        cafeVan:     safeNum(all[r][4]),
-        helper:      safeNum(all[r][5]),
-        totalStaff:  safeNum(all[r][6])
+        ds:               ds,
+        chillerVan:       safeNum(all[r][colOf.chillerVan]),
+        truck3ton:        safeNum(all[r][colOf.truck3ton]),
+        truckDriver:      safeNum(all[r][colOf.truckDriver]),
+        cafeVan:          safeNum(all[r][colOf.cafeVan]),
+        helper:           safeNum(all[r][colOf.helper]),
+        supplyChainTruck: safeNum(all[r][colOf.supplyChainTruck]),
+        totalStaff:       safeNum(all[r][colOf.totalStaff]),
+        delivery:         safeNum(all[r][colOf.delivery]),
+        vanCost:          safeNum(all[r][colOf.vanCost]),
+        truckCost:        safeNum(all[r][colOf.truckCost]),
+        helperCost:       safeNum(all[r][colOf.helperCost])
       });
     }
-    return { rows: rows };
+    // Diagnostics: what the header row looked like and which column each
+    // field resolved to, so a mis-located column is visible on the page
+    // instead of silently reading as zero.
+    var colLetter = function(i){
+      var s = '', n = i;
+      while (n >= 0) { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; }
+      return s;
+    };
+    var resolved = {};
+    Object.keys(colOf).forEach(function(k){
+      resolved[k] = { index: colOf[k], letter: colLetter(colOf[k]), header: hdr[colOf[k]] || '' };
+    });
+    return {
+      rows: rows,
+      meta: {
+        sheetName:   sheet.getName(),
+        lastColumn:  sheet.getLastColumn(),
+        lastColLetter: colLetter(sheet.getLastColumn() - 1),
+        headers:     hdr,
+        resolved:    resolved
+      }
+    };
   } catch(e) { return { rows: [], error: e.message }; }
+}
+
+// ════════════════════════════════════════════════════════════
+// LOGISTICS INVOICES — supplier invoices, one row per line item
+// Sheet "LOGISTICS INVOICES" in SS_COMPLAINTS, created on first save.
+// Several invoices may share a month; each keeps its own id so it can be
+// listed and removed on its own.
+// ════════════════════════════════════════════════════════════
+var SHEET_LOGISTICS_INV = 'LOGISTICS INVOICES';
+var LOGISTICS_INV_HEADERS = ['Invoice ID','Month','Supplier','Invoice No','Invoice Date',
+  'Currency','Line Item','Net Amount','VAT','Line Total','Saved At','Saved By','File URL',
+  'Invoice Net','Invoice VAT','Invoice Total','Category'];
+
+function _ensureLogisticsInvSheet_(ss) {
+  var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
+  if (!sh) {
+    sh = ss.insertSheet(SHEET_LOGISTICS_INV);
+    sh.getRange(1, 1, 1, LOGISTICS_INV_HEADERS.length).setValues([LOGISTICS_INV_HEADERS]);
+    sh.getRange(1, 1, 1, LOGISTICS_INV_HEADERS.length).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  // "2026-07" is a date as far as Sheets is concerned; left as a date the
+  // month can never be matched back to the page's YYYY-MM again.
+  try { sh.getRange('B:B').setNumberFormat('@'); } catch (e) {}
+  // Sheets created before the invoice-level total columns existed.
+  try {
+    if (sh.getLastColumn() < LOGISTICS_INV_HEADERS.length) {
+      sh.getRange(1, 1, 1, LOGISTICS_INV_HEADERS.length).setValues([LOGISTICS_INV_HEADERS]);
+      sh.getRange(1, 1, 1, LOGISTICS_INV_HEADERS.length).setFontWeight('bold');
+    }
+  } catch (e) {}
+  return sh;
+}
+
+// Accepts whatever the Month cell turned into and returns YYYY-MM.
+function _normYm_(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) return v.getFullYear() + '-' + pad2(v.getMonth() + 1);
+  var t = String(v == null ? '' : v).trim();
+  var m = t.match(/^(\d{4})-(\d{1,2})/);
+  if (m) return m[1] + '-' + pad2(parseInt(m[2], 10));
+  var d = new Date(t);
+  if (!isNaN(d.getTime())) return d.getFullYear() + '-' + pad2(d.getMonth() + 1);
+  return t;
+}
+
+// Maps an invoice line to one of the five cost components. Anything that
+// matches none of them is "other", which counts as variable — adjustments and
+// one-off charges behave like variable spend, not like the fixed fleet.
+function _invCategory_(desc) {
+  var d = String(desc || '').toLowerCase();
+  if (/fuel|diesel|petrol/.test(d))            return 'fuel';
+  if (/salik|toll/.test(d))                    return 'salik';
+  if (/helper/.test(d))                        return 'helpers';
+  if (/truck/.test(d))                         return 'trucks';
+  if (/van/.test(d))                           return 'vans';
+  return 'other';
+}
+function _invIsFixedCat_(c) { return c === 'vans' || c === 'trucks' || c === 'helpers'; }
+
+// ── numeric helpers shared by the parser ──────────────────────
+function _invNum_(s) {
+  if (s === null || s === undefined) return null;
+  var t = String(s).replace(/[^0-9.\-]/g, '');
+  if (t === '' || t === '-' || t === '.') return null;
+  var n = parseFloat(t);
+  return isNaN(n) ? null : n;
+}
+function _invIsAmountLine_(l) { return /^-?[\d,]+\.\d{1,2}$/.test(l); }
+function _invAmountsOn_(l) {
+  var m = l.match(/-?[\d,]+\.\d{1,2}/g);
+  return m ? m.map(_invNum_).filter(function(n){ return n !== null; }) : [];
+}
+
+// ── Parse the text of a supplier invoice into a draft ─────────
+// Deliberately conservative: anything it cannot read becomes a warning shown
+// on the confirm screen rather than a silently wrong number.
+function parseLogisticsInvoiceText(text) {
+  var warnings = [];
+  var raw = String(text || '').replace(/ /g, ' ');
+  var lines = raw.split(/\r?\n/).map(function(s){ return s.trim(); });
+
+  var invoiceNo = '', invoiceDate = '', supplier = '', currency = 'AED';
+
+  var mNo = raw.match(/#\s*(INV[-\s]?[A-Za-z0-9\-\/]+)/i);
+  if (mNo) invoiceNo = mNo[1].replace(/\s+/g, '-').toUpperCase();
+
+  var mDate = raw.match(/Invoice\s*Date\s*[:\-]?\s*([0-9]{1,2}\s+[A-Za-z]{3,}\s+[0-9]{4})/i);
+  if (mDate) invoiceDate = mDate[1];
+
+  if (/\bAED\b/.test(raw)) currency = 'AED';
+  else if (/\bQAR\b/.test(raw)) currency = 'QAR';
+  else if (/\bSAR\b/.test(raw)) currency = 'SAR';
+
+  // ── Supplier ────────────────────────────────────────────────
+  // The vendor block sits above "TAX INVOICE" and above "Bill To".
+  // Both anchors are tried because PDF-to-text conversions order the page
+  // differently depending on how the original was laid out.
+  var isLabel = function(L){ return L.indexOf(':') > -1 || /^POWERED BY/i.test(L); };
+  var isNoise = function(L){
+    return /@|www\.|\.com|^TRN\b|^VAT\b|United Arab Emirates|^P\.?O\.?\s*Box|^Tel\b|^Phone\b/i.test(L);
+  };
+  var takeNameFrom = function(idx){
+    var block = [];
+    for (var j = idx - 1; j >= 0 && block.length < 10; j--) {
+      var L = lines[j];
+      if (L === '') continue;
+      if (isLabel(L)) break;
+      block.unshift(L);
+    }
+    var name = [];
+    for (var k = 0; k < block.length; k++) {
+      var b = block[k];
+      if (isNoise(b)) break;
+      if (k > 0 && !/^(LLC|L\.L\.C\.?|FZE|FZCO|WLL|W\.L\.L\.?|LTD|CO\.?)$/i.test(b) && name.length >= 1
+          && /[-,\/]|Cluster|Street|Road|Dubai|Abu Dhabi|Sharjah|Ajman/i.test(b)) break;
+      name.push(b);
+      if (name.length >= 3) break;
+    }
+    return name.join(' ').replace(/\s+/g, ' ').trim();
+  };
+  for (var t = 0; t < lines.length && !supplier; t++) {
+    if (/TAX\s*INVOICE/i.test(lines[t])) supplier = takeNameFrom(t);
+  }
+  if (!supplier) {
+    for (var t2 = 0; t2 < lines.length && !supplier; t2++) {
+      if (/^Bill\s*To\b/i.test(lines[t2])) supplier = takeNameFrom(t2);
+    }
+  }
+  if (!supplier) {
+    // Last resort: the first company-looking line on the page.
+    for (var t3 = 0; t3 < Math.min(lines.length, 40); t3++) {
+      if (/(LLC|L\.L\.C|FZE|FZCO|W\.?L\.?L\.?|LTD)\s*$/i.test(lines[t3]) && !isLabel(lines[t3])) {
+        supplier = lines[t3].trim(); break;
+      }
+    }
+  }
+
+  if (!supplier)    warnings.push('Supplier name could not be read — please type it in.');
+  if (!invoiceNo)   warnings.push('Invoice number could not be read — please type it in.');
+  if (!invoiceDate) warnings.push('Invoice date could not be read — please pick it.');
+
+  // ── Line items ──────────────────────────────────────────────
+  // The invoice's own totals are extracted first: they are the oracle the
+  // line reading is checked against.
+  var subTotal = null, vatTotal = null, grandTotal = null;
+  var mSub = raw.match(/Sub\s*Total\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})/i);
+  if (mSub) { subTotal = _invNum_(mSub[1]); vatTotal = _invNum_(mSub[2]); grandTotal = _invNum_(mSub[3]); }
+  if (subTotal === null || vatTotal === null) {
+    var mTax = raw.match(/Standard\s*Rate\s*\([\d.]+%\)\s*([\d,]+\.\d{2})\s+([\d,]+\.\d{2})/i);
+    if (mTax) { if (subTotal === null) subTotal = _invNum_(mTax[1]); if (vatTotal === null) vatTotal = _invNum_(mTax[2]); }
+  }
+  if (grandTotal === null) {
+    var mBal = raw.match(/Balance\s*Due\s*[A-Z]{0,3}\s*([\d,]+\.\d{2})/i);
+    if (mBal) grandTotal = _invNum_(mBal[1]);
+  }
+  if (grandTotal === null && subTotal !== null && vatTotal !== null) grandTotal = subTotal + vatTotal;
+
+  // Item headers are numbered 1, 2, 3 … The number may share a line with the
+  // description or sit on its own, depending on whether the converter kept the
+  // invoice table. Requiring the next expected number rejects the hundreds of
+  // "11650 184.8" toll rows and lines like "18 helpers- *1800".
+  var starts = [], expected = 1;
+  for (var a = 0; a < lines.length; a++) {
+    var L2 = lines[a];
+    var inline = L2.match(/^(\d{1,2})\s+([A-Za-z#].*)$/);
+    if (inline && parseInt(inline[1], 10) === expected) {
+      starts.push({ i: a, name: inline[2].trim() }); expected++; continue;
+    }
+    if (/^\d{1,2}$/.test(L2) && parseInt(L2, 10) === expected) {
+      for (var nx = a + 1; nx < Math.min(a + 4, lines.length); nx++) {
+        if (lines[nx] === '') continue;
+        if (/^[A-Za-z#]/.test(lines[nx])) { starts.push({ i: a, name: lines[nx].trim() }); expected++; }
+        break;
+      }
+    }
+  }
+
+  // Each item's block, reduced to an ordered run of amounts and rate markers.
+  var TOKEN = /(\d{1,2}(?:\.\d{1,2})?\s*%)|(-?[\d,]*\d\.\d{1,2})/g;
+  // The last item ends where the invoice's summary begins. Without this the
+  // final block swallows Sub Total and Balance Due, and their figures get read
+  // as if they were that item's own.
+  // Searched only after the last item begins: these invoices print "Balance
+  // Due" in the header too, and anchoring on that would put the summary
+  // before every item and disable the bound entirely.
+  var summaryAt = lines.length;
+  var lastStart = starts.length ? starts[starts.length - 1].i : 0;
+  for (var sIdx = lastStart + 1; sIdx < lines.length; sIdx++) {
+    if (/^(sub\s*total|balance\s*due|tax\s*summary|total\s+AED)/i.test(lines[sIdx])) { summaryAt = sIdx; break; }
+  }
+  var blocks = [];
+  for (var b2 = 0; b2 < starts.length; b2++) {
+    var from = starts[b2].i;
+    var to = (b2 + 1 < starts.length) ? starts[b2 + 1].i : lines.length;
+    if (from < summaryAt && to > summaryAt) to = summaryAt;
+    var toks = [], m2;
+    for (var li = from; li < to; li++) {
+      TOKEN.lastIndex = 0;
+      while ((m2 = TOKEN.exec(lines[li])) !== null) {
+        if (m2[1]) toks.push({ pct: true });
+        else toks.push({ n: _invNum_(m2[2]) });
+      }
+    }
+    blocks.push({ name: String(starts[b2].name || '')
+                          .replace(/(\s+\d[\d,\.]{2,})+\s*$/, '')
+                          .replace(/\s+/g, ' ').trim(), toks: toks });
+  }
+
+  // Three ways of reading a block. Which one is right depends on how the
+  // converter laid the table out, so rather than assume, all three are tried
+  // and the one whose line totals reconcile with the invoice is kept.
+  function readBlock(bk, mode) {
+    var toks = bk.toks, nums = [], pctAt = -1, i2;
+    for (i2 = 0; i2 < toks.length; i2++) {
+      if (toks[i2].pct) { if (pctAt < 0) pctAt = nums.length; }
+      else nums.push(toks[i2].n);
+    }
+    if (!nums.length) return null;
+    var total = null, tax = null;
+    if (mode === 'afterRate') {
+      if (pctAt < 0 || pctAt >= nums.length) return null;
+      total = nums[pctAt];
+      tax = pctAt > 0 ? nums[pctAt - 1] : null;
+    } else if (mode === 'lastTwo') {
+      total = nums[nums.length - 1];
+      tax = nums.length > 1 ? nums[nums.length - 2] : null;
+    } else { // largest
+      var bi = 0;
+      for (i2 = 1; i2 < nums.length; i2++) if (nums[i2] > nums[bi]) bi = i2;
+      total = nums[bi];
+      tax = bi > 0 ? nums[bi - 1] : null;
+    }
+    if (total === null) return null;
+    if (tax !== null && total < tax) { var t3 = total; total = tax; tax = t3; }
+    var taxable = (tax !== null) ? (total - tax) : total;
+    return {
+      category: _invCategory_(bk.name),
+      description: bk.name || 'Line item',
+      taxable: Math.round(taxable * 100) / 100,
+      vat: tax === null ? 0 : Math.round(tax * 100) / 100,
+      total: Math.round(total * 100) / 100
+    };
+  }
+
+  // Some converters keep each item's figures beside its description; others
+  // (Drive's, for these invoices) print every description first, then every
+  // "qty rate taxable tax rate%" row, then every line total. Block-based
+  // reading cannot work on the second kind, because item 1's figures land
+  // after item 2's description.
+  //
+  // What holds in both: the two amounts immediately before a rate marker are
+  // that line's taxable amount and its tax, and the rate markers occur in item
+  // order. Pairing those with the item names in order reads either layout.
+  function readByRateMarkers() {
+    var toks = [], m3;
+    for (var li2 = 0; li2 < Math.min(summaryAt, lines.length); li2++) {
+      TOKEN.lastIndex = 0;
+      while ((m3 = TOKEN.exec(lines[li2])) !== null) {
+        if (m3[1]) toks.push({ pct: true });
+        else toks.push({ n: _invNum_(m3[2]) });
+      }
+    }
+    var figures = [];
+    for (var k3 = 0; k3 < toks.length; k3++) {
+      if (!toks[k3].pct) continue;
+      var pair = [];
+      for (var j3 = k3 - 1; j3 >= 0 && pair.length < 2; j3--) {
+        if (toks[j3].n !== undefined) pair.push(toks[j3].n);
+      }
+      if (pair.length < 2) continue;
+      var tax3 = pair[0], taxable3 = pair[1];
+      figures.push({ taxable: Math.round(taxable3 * 100) / 100,
+                     vat: Math.round(tax3 * 100) / 100,
+                     total: Math.round((taxable3 + tax3) * 100) / 100 });
+    }
+    var out3 = [];
+    var n3 = Math.min(figures.length, blocks.length);
+    for (var q3 = 0; q3 < n3; q3++) {
+      out3.push({ category: _invCategory_(blocks[q3].name),
+                  description: blocks[q3].name || ('Line ' + (q3 + 1)),
+                  taxable: figures[q3].taxable, vat: figures[q3].vat, total: figures[q3].total });
+    }
+    return out3;
+  }
+
+  var best = null;
+  var pairRead = readByRateMarkers();
+  if (pairRead.length) {
+    var pairSum = 0;
+    pairRead.forEach(function(x){ pairSum += x.total; });
+    pairSum = Math.round(pairSum * 100) / 100;
+    best = { mode: 'rateMarkers', items: pairRead, sum: pairSum, count: pairRead.length,
+             full: pairRead.length >= blocks.length,
+             err: (grandTotal !== null) ? Math.abs(pairSum - grandTotal) : 0 };
+  }
+
+  ['afterRate', 'lastTwo', 'largest'].forEach(function(mode){
+    var its = [];
+    for (var k2 = 0; k2 < blocks.length; k2++) {
+      var it2 = readBlock(blocks[k2], mode);
+      if (it2) its.push(it2);
+    }
+    var sum2 = 0;
+    its.forEach(function(x){ sum2 += x.total; });
+    sum2 = Math.round(sum2 * 100) / 100;
+    var err = (grandTotal !== null) ? Math.abs(sum2 - grandTotal) : (its.length ? 0 : Infinity);
+    var cand = { mode: mode, items: its, sum: sum2, err: err, count: its.length,
+                 full: its.length >= blocks.length };
+    if (!best) { best = cand; return; }
+    // A reading that recovers every line beats one that merely adds up.
+    if (cand.full !== best.full) { if (cand.full) best = cand; return; }
+    if (cand.err < best.err - 0.005) best = cand;
+    else if (Math.abs(cand.err - best.err) <= 0.005 && cand.count > best.count) best = cand;
+  });
+
+  var items = best ? best.items : [];
+  var readMode = best ? best.mode : 'none';
+
+  var sumTotal = 0, sumTaxable = 0;
+  items.forEach(function(it){ sumTotal += it.total; sumTaxable += it.taxable; });
+  sumTotal = Math.round(sumTotal * 100) / 100;
+  sumTaxable = Math.round(sumTaxable * 100) / 100;
+
+  var biggest = 0;
+  items.forEach(function(it){ if (it.total > biggest) biggest = it.total; });
+  if (grandTotal && items.length && (items.length < 3 || biggest > grandTotal * 0.7)) {
+    warnings.push('The reader only recovered ' + items.length + ' line'
+      + (items.length === 1 ? '' : 's') + ' from this invoice'
+      + (biggest > grandTotal * 0.7 ? ', one of them holding most of the total' : '')
+      + '. The breakdown is unreliable — open "Show the text read from the PDF" below and send that text so '
+      + 'the reader can be fixed for this layout.');
+  }
+  var bad = items.filter(function(it){ return it.taxable < 0; });
+  if (bad.length) {
+    warnings.push(bad.length + ' line' + (bad.length === 1 ? '' : 's') + ' came out with a negative net amount ('
+      + bad.map(function(b){ return b.description; }).join(', ') + ') — those were misread. '
+      + 'The invoice total below is still correct; fix or delete those lines.');
+  }
+  if (!items.length) warnings.push('No line items were recognised — add them by hand below, and send me the extracted text so the reader can be tuned.');
+  if (grandTotal !== null && items.length && Math.abs(sumTotal - grandTotal) > 1) {
+    warnings.push('Line items add up to ' + sumTotal.toFixed(2) + ' but the invoice total reads '
+      + grandTotal.toFixed(2) + ' — check the lines below.');
+  }
+  if (subTotal !== null && items.length && Math.abs(sumTaxable - subTotal) > 1) {
+    warnings.push('Net line amounts add up to ' + sumTaxable.toFixed(2)
+      + ' but the invoice sub-total reads ' + subTotal.toFixed(2) + '.');
+  }
+
+  var ym = '';
+  if (invoiceDate) {
+    var d = new Date(invoiceDate);
+    if (!isNaN(d.getTime())) ym = d.getFullYear() + '-' + pad2(d.getMonth() + 1);
+  }
+
+  return {
+    supplier: supplier, invoiceNo: invoiceNo, invoiceDate: invoiceDate, ym: ym, currency: currency,
+    items: items, subTotal: subTotal, vatTotal: vatTotal, grandTotal: grandTotal,
+    sumTotal: sumTotal, sumTaxable: sumTaxable, warnings: warnings, readMode: readMode,
+    diag: { headersFound: starts.length, blocks: blocks.length, lines: lines.length,
+            headerNames: starts.map(function(x){ return x.name; }).slice(0, 12) },
+    rawText: raw.length > 12000 ? raw.substring(0, 12000) + '\n… (truncated)' : raw
+  };
+}
+
+// ── PDF → text, via Drive's PDF-to-Doc conversion (with OCR) ───
+// Uses the Drive REST API with the script's own OAuth token, so the Advanced
+// Drive Service does not need enabling by hand. DriveApp is referenced when
+// filing the original, which is what grants the Drive scope.
+function _ocrPdfToText_(blob, name) {
+  var token = ScriptApp.getOAuthToken();
+  var boundary = '-----UMPInvoiceBoundary' + Date.now();
+  var meta = { name: 'ump-ocr-' + (name || 'invoice'), mimeType: 'application/vnd.google-apps.document' };
+
+  var pre = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'
+          + JSON.stringify(meta) + '\r\n--' + boundary + '\r\nContent-Type: application/pdf\r\n\r\n';
+  var post = '\r\n--' + boundary + '--\r\n';
+  var payload = Utilities.newBlob(pre).getBytes()
+    .concat(blob.getBytes())
+    .concat(Utilities.newBlob(post).getBytes());
+
+  var res = UrlFetchApp.fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&ocrLanguage=en',
+    { method: 'post', contentType: 'multipart/related; boundary=' + boundary,
+      payload: payload, headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+
+  if (res.getResponseCode() >= 300) {
+    throw new Error('Could not convert the PDF (Drive said ' + res.getResponseCode() + '). '
+      + 'Re-authorise the script from the Apps Script editor and try again.');
+  }
+  var fileId = JSON.parse(res.getContentText()).id;
+  var text = '';
+  try {
+    text = DocumentApp.openById(fileId).getBody().getText();
+  } finally {
+    try { DriveApp.getFileById(fileId).setTrashed(true); } catch (e) {}
+  }
+  return text;
+}
+
+// Converts a file already in Drive, so the PDF bytes cross the network once
+// instead of being uploaded again just to be read.
+function _ocrDriveFileToText_(fileId, name) {
+  var token = ScriptApp.getOAuthToken();
+  var res = UrlFetchApp.fetch(
+    'https://www.googleapis.com/drive/v3/files/' + fileId + '/copy?ocrLanguage=en',
+    { method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ name: 'ump-ocr-' + (name || 'invoice'),
+                                mimeType: 'application/vnd.google-apps.document' }),
+      headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+  if (res.getResponseCode() >= 300) {
+    throw new Error('Could not convert the PDF (Drive said ' + res.getResponseCode() + ').');
+  }
+  var docId = JSON.parse(res.getContentText()).id;
+  var text = '';
+  try { text = DocumentApp.openById(docId).getBody().getText(); }
+  finally { try { DriveApp.getFileById(docId).setTrashed(true); } catch (e) {} }
+  return text;
+}
+
+// Keeps the original PDFs together so a saved figure can be traced back.
+function _umpInvoiceFolder_() {
+  var it = DriveApp.getFoldersByName('UMP Logistics Invoices');
+  return it.hasNext() ? it.next() : DriveApp.createFolder('UMP Logistics Invoices');
+}
+
+// ── Called from the page: read an uploaded PDF into a draft ────
+function parseLogisticsInvoiceUpload(base64, filename) {
+  try {
+    var bytes = Utilities.base64Decode(base64);
+    var blob  = Utilities.newBlob(bytes, 'application/pdf', filename || 'invoice.pdf');
+
+    // File it once, then convert that copy in place. Falls back to sending the
+    // bytes again only if filing failed.
+    var stored = null, storedId = null;
+    try {
+      var f = _umpInvoiceFolder_().createFile(blob);
+      stored = f.getUrl(); storedId = f.getId();
+    } catch (e) { /* filing is a convenience; never block the parse on it */ }
+
+    var text = storedId ? _ocrDriveFileToText_(storedId, filename)
+                        : _ocrPdfToText_(blob, filename);
+    var draft = parseLogisticsInvoiceText(text);
+    draft.fileUrl = stored;
+    draft.ok = true;
+    if (!text || !text.replace(/\s/g, '')) {
+      draft.warnings.push('No text came back from the PDF at all — it may be a scan of an image.');
+    }
+    return draft;
+  } catch (e) {
+    return { ok: false, error: e.message, warnings: [], items: [] };
+  }
+}
+
+// Re-reads an invoice from the PDF already filed in Drive. Rows saved by an
+// earlier version of the reader carry its mistakes; this re-parses them with
+// the current one without the PDF being uploaded again.
+function _driveIdFromUrl_(url) {
+  var m = String(url || '').match(/[-\w]{25,}/);
+  return m ? m[0] : '';
+}
+
+// Re-reads every stored invoice that still has its PDF, a few at a time so a
+// run stays inside the Apps Script time limit. The caller repeats while
+// "remaining" is above zero.
+function reparseAllStoredInvoices(max) {
+  max = max || 3;
+  var res = { ok: true, build: UMP_BUILD, updated: [], skipped: [], failed: [], remaining: 0 };
+  try {
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
+    if (!sh) return { ok: false, error: 'No LOGISTICS INVOICES sheet found.' };
+
+    var all = sh.getDataRange().getValues();
+    var seen = {}, list = [];
+    for (var r = 1; r < all.length; r++) {
+      var id = String(all[r][0] || '');
+      if (!id || seen[id]) continue;
+      seen[id] = 1;
+      list.push({ id: id, ym: _normYm_(all[r][1]), supplier: String(all[r][2] || ''),
+                  invoiceNo: String(all[r][3] || ''), currency: String(all[r][5] || 'AED'),
+                  fileUrl: String(all[r][12] || '') });
+    }
+
+    var done = 0;
+    for (var i = 0; i < list.length; i++) {
+      var inv = list[i];
+      if (!inv.fileUrl) { res.skipped.push(inv.invoiceNo || inv.id); continue; }
+      if (done >= max) { res.remaining++; continue; }
+      try {
+        var d = reparseStoredInvoice(inv.fileUrl);
+        if (!d || !d.ok || !d.items || !d.items.length) {
+          res.failed.push((inv.invoiceNo || inv.id) + ': ' + ((d && d.error) || 'no line items recovered'));
+          done++; continue;
+        }
+        // Remove the old rows first so a blank invoice number cannot leave a
+        // duplicate behind.
+        _deleteInvoiceRows_(sh, inv.id, inv.supplier, inv.invoiceNo);
+        var sv = saveLogisticsInvoice({
+          ym: inv.ym || d.ym, supplier: d.supplier || inv.supplier,
+          invoiceNo: d.invoiceNo || inv.invoiceNo, invoiceDate: d.invoiceDate || '',
+          currency: d.currency || inv.currency, items: d.items, fileUrl: inv.fileUrl,
+          replace: true, invoiceNet: d.subTotal, invoiceVat: d.vatTotal, invoiceTotal: d.grandTotal
+        });
+        if (sv && sv.ok) res.updated.push((inv.invoiceNo || inv.id) + ' (' + d.items.length + ' lines)');
+        else res.failed.push((inv.invoiceNo || inv.id) + ': ' + ((sv && sv.error) || 'save failed'));
+        done++;
+      } catch (e) {
+        res.failed.push((inv.invoiceNo || inv.id) + ': ' + e.message);
+        done++;
+      }
+    }
+    _invalidateCache();
+    return res;
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+function reparseStoredInvoice(fileUrl) {
+  try {
+    var id = _driveIdFromUrl_(fileUrl);
+    if (!id) {
+      return { ok: false, warnings: [], items: [],
+               error: 'No stored PDF is linked to this invoice — add it again instead.' };
+    }
+    var text  = _ocrDriveFileToText_(id, 'reread');
+    var draft = parseLogisticsInvoiceText(text);
+    draft.fileUrl = fileUrl;
+    draft.ok = true;
+    return draft;
+  } catch (e) {
+    return { ok: false, warnings: [], items: [], error: e.message };
+  }
+}
+
+function saveLogisticsInvoice(payload) {
+  try {
+    if (!payload) throw new Error('Nothing to save.');
+    var items = (payload.items || []).filter(function(it){
+      return String(it.description || '').trim() !== '' || _invNum_(it.total) !== null;
+    });
+    if (!items.length) throw new Error('Add at least one line item before saving.');
+    if (!payload.ym) throw new Error('Pick the month this invoice belongs to.');
+
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var sh = _ensureLogisticsInvSheet_(ss);
+    var all = sh.getDataRange().getValues();
+
+    var supplier  = String(payload.supplier  || '').trim();
+    var invoiceNo = String(payload.invoiceNo || '').trim();
+
+    // An edit or re-read names the rows it is replacing, so the old ones go
+    // even when the invoice number is blank or has changed.
+    if (payload.replaceId) {
+      try { _deleteInvoiceRows_(sh, payload.replaceId, supplier, invoiceNo); } catch (e) {}
+      all = sh.getDataRange().getValues();
+    }
+
+    // Same supplier + invoice number already stored? Replace it rather than
+    // silently double-counting the month.
+    var dupId = null;
+    for (var r = 1; r < all.length; r++) {
+      if (String(all[r][2]).trim().toLowerCase() === supplier.toLowerCase() &&
+          String(all[r][3]).trim().toLowerCase() === invoiceNo.toLowerCase() && invoiceNo) {
+        dupId = String(all[r][0]); break;
+      }
+    }
+    if (dupId && !payload.replace) {
+      return { ok: false, duplicate: true,
+               error: 'Invoice ' + invoiceNo + ' from ' + supplier + ' is already saved.' };
+    }
+    if (dupId) _deleteInvoiceRows_(sh, dupId);
+
+    var id = 'INV' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    var now = new Date();
+    var who = '';
+    try { who = Session.getActiveUser().getEmail() || ''; } catch (e) {}
+
+    // The invoice's own stated totals are authoritative. Line items are a
+    // breakdown and may be read imperfectly; the bill's own Sub Total is a
+    // single figure and is what the cost must be based on.
+    var sumNet = 0, sumVat = 0, sumTot = 0;
+    items.forEach(function(it){
+      var n = _invNum_(it.taxable) || 0, v = _invNum_(it.vat) || 0;
+      var t = _invNum_(it.total); if (t === null) t = n + v;
+      sumNet += n; sumVat += v; sumTot += t;
+    });
+    var hdrNet = _invNum_(payload.invoiceNet);
+    var hdrVat = _invNum_(payload.invoiceVat);
+    var hdrTot = _invNum_(payload.invoiceTotal);
+    if (hdrTot === null || hdrTot <= 0) { hdrNet = sumNet; hdrVat = sumVat; hdrTot = sumTot; }
+    if (hdrNet === null) hdrNet = hdrTot - (hdrVat || 0);
+    if (hdrVat === null) hdrVat = hdrTot - hdrNet;
+
+    var rows = items.map(function(it){
+      var net = _invNum_(it.taxable), vat = _invNum_(it.vat), tot = _invNum_(it.total);
+      if (tot === null) tot = (net || 0) + (vat || 0);
+      if (net === null) net = tot - (vat || 0);
+      return [id, payload.ym, supplier, invoiceNo, payload.invoiceDate || '',
+              payload.currency || 'AED', String(it.description || '').trim(),
+              net, vat || 0, tot, now, who, payload.fileUrl || '',
+              hdrNet, hdrVat, hdrTot,
+              String(it.category || _invCategory_(it.description))];
+    });
+    var startRow = sh.getLastRow() + 1;
+    sh.getRange(startRow, 2, rows.length, 1).setNumberFormat('@');
+    sh.getRange(startRow, 1, rows.length, LOGISTICS_INV_HEADERS.length).setValues(rows);
+    _invalidateCache();
+    return { ok: true, id: id, lines: rows.length };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// Returns how many rows were removed so the caller can tell "deleted" from
+// "matched nothing" — the two used to be indistinguishable.
+function _deleteInvoiceRows_(sh, id, supplier, invoiceNo) {
+  var all = sh.getDataRange().getValues();
+  var want = String(id == null ? '' : id).trim();
+  var wSup = String(supplier || '').trim().toLowerCase();
+  var wNo  = String(invoiceNo || '').trim().toLowerCase();
+  var removed = 0;
+  for (var r = all.length - 1; r >= 1; r--) {
+    var rowId = String(all[r][0] == null ? '' : all[r][0]).trim();
+    var hit = (want !== '' && rowId === want);
+    // Fall back to supplier + invoice number so a row whose id no longer
+    // lines up can still be removed rather than being stuck on the page.
+    if (!hit && wNo !== '') {
+      hit = (String(all[r][3] || '').trim().toLowerCase() === wNo) &&
+            (wSup === '' || String(all[r][2] || '').trim().toLowerCase() === wSup);
+    }
+    if (hit) { sh.deleteRow(r + 1); removed++; }
+  }
+  return removed;
+}
+
+function deleteLogisticsInvoice(id, supplier, invoiceNo) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
+    if (!sh) return { ok: false, removed: 0, error: 'The LOGISTICS INVOICES sheet was not found.' };
+    var removed = _deleteInvoiceRows_(sh, id, supplier, invoiceNo);
+    _invalidateCache();
+    if (!removed) {
+      return { ok: false, removed: 0,
+               error: 'Nothing matched that invoice in the sheet (id ' + id + ').' };
+    }
+    return { ok: true, removed: removed };
+  } catch (e) {
+    return { ok: false, removed: 0, error: e.message };
+  }
+}
+
+// Grouped back into invoices for the page.
+function getLogisticsInvoiceData(force) {
+  var _ck = _srcKey_(_CACHE_INV, [SS_COMPLAINTS]);
+  if (!force) {
+    var hit = _cacheGet_(_ck);
+    if (hit) return hit;
+  }
+  try {
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
+    if (!sh) return { invoices: [] };
+    var all = sh.getDataRange().getValues();
+    if (all.length < 2) return { invoices: [] };
+
+    var byId = {}, order = [];
+    for (var r = 1; r < all.length; r++) {
+      var id = String(all[r][0] || '');
+      if (!id) continue;
+      if (!byId[id]) {
+        var dv = all[r][4], ds = '';
+        if (dv instanceof Date && !isNaN(dv.getTime())) {
+          ds = dv.getDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dv.getMonth()] + ' ' + dv.getFullYear();
+        } else { ds = String(dv || ''); }
+        byId[id] = { id: id, ym: _normYm_(all[r][1]), supplier: String(all[r][2] || ''),
+                     invoiceNo: String(all[r][3] || ''), invoiceDate: ds,
+                     currency: String(all[r][5] || 'AED'), items: [],
+                     net: 0, vat: 0, total: 0,
+                     sumNet: 0, sumVat: 0, sumTotal: 0,
+                     hdrNet: safeNum(all[r][13]), hdrVat: safeNum(all[r][14]), hdrTotal: safeNum(all[r][15]),
+                     savedBy: String(all[r][11] || ''), fileUrl: String(all[r][12] || '') };
+        order.push(id);
+      }
+      var inv = byId[id];
+      var net = safeNum(all[r][7]), vat = safeNum(all[r][8]), tot = safeNum(all[r][9]);
+      var cat = String(all[r][16] || '').trim().toLowerCase();
+      if (!cat) cat = _invCategory_(all[r][6]);
+      inv.items.push({ description: String(all[r][6] || ''), taxable: net, vat: vat, total: tot, category: cat });
+      inv.sumNet += net; inv.sumVat += vat; inv.sumTotal += tot;
+    }
+    var out = order.map(function(id){
+      var v = byId[id];
+      var rd = function(n){ return Math.round(n * 100) / 100; };
+      v.sumNet = rd(v.sumNet); v.sumVat = rd(v.sumVat); v.sumTotal = rd(v.sumTotal);
+      // Prefer the invoice's own totals; fall back to the line sum for rows
+      // saved before those columns existed.
+      var useHdr = v.hdrTotal > 0;
+      v.net   = rd(useHdr ? v.hdrNet   : v.sumNet);
+      v.vat   = rd(useHdr ? v.hdrVat   : v.sumVat);
+      v.total = rd(useHdr ? v.hdrTotal : v.sumTotal);
+      v.fromHeader = useHdr;
+      v.linesMismatch = (v.sumTotal > 0 && Math.abs(v.sumTotal - v.total) > 1);
+      return v;
+    });
+    var payload = { invoices: out, build: UMP_BUILD };
+    _cachePut_(_ck, payload);
+    return payload;
+  } catch (e) { return { invoices: [], error: e.message }; }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1390,6 +2272,233 @@ function updateCapacityTarget(weekStr, newTarget) {
 }
 
 // ════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// DISTRICT SHIFTS — Early Morning / Morning / Evening per district,
+// plus one note per day. Held on its own sheet so DISTRICT DELIVERIES keeps
+// its existing shape; the district figures there stay authoritative and are
+// rewritten from the shift totals whenever a day is saved.
+// ════════════════════════════════════════════════════════════
+var SHEET_DISTRICT_SHIFTS = 'DISTRICT SHIFTS';
+var DISTRICT_SHIFT_NAMES  = ['Evening', 'Morning', 'Early Morning'];
+
+function _shiftKey_(s) { return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toLowerCase(); }
+function _isShiftWord_(s) {
+  var k = _shiftKey_(s);
+  return k === 'evening' || k === 'morning' || k === 'early morning';
+}
+
+// Districts are whatever DISTRICT DELIVERIES lists, minus its Total column,
+// so the two sheets cannot drift apart.
+function _districtNames_(ss) {
+  var d = getDistrictDeliveriesData(ss);
+  return (d.headers || []).filter(function(h){ return h.toLowerCase().indexOf('total') === -1; });
+}
+
+// Reads whatever header shape the sheet already uses rather than imposing one.
+// The sheet in use carries the district on row 1 and the shift on row 2, with
+// data from row 3; a single header row is also accepted.
+function _dsLayout_(sh) {
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var top = sh.getRange(1, 1, Math.min(2, Math.max(sh.getLastRow(), 1)), lastCol).getValues();
+  var row1 = top[0] || [];
+  var row2 = top.length > 1 ? top[1] : [];
+
+  var twoRow = false;
+  for (var c = 1; c < lastCol; c++) { if (_isShiftWord_(row2[c])) { twoRow = true; break; } }
+
+  var colOf = {}, notesCol = -1;
+  // A merged district cell reports its value only in the first column of the
+  // merge, so the last district seen carries forward across its shifts.
+  var carry = '';
+  for (var c2 = 1; c2 < lastCol; c2++) {   // column A is the date
+    var a = String(row1[c2] == null ? '' : row1[c2]).trim();
+    var b = twoRow ? String(row2[c2] == null ? '' : row2[c2]).trim() : '';
+    if (a) carry = a;
+    var combined = twoRow ? (_shiftKey_(carry) + ' ' + _shiftKey_(b)).trim() : _shiftKey_(a);
+    if (!combined) continue;
+    if (combined.indexOf('note') > -1 || combined.indexOf('remark') > -1 || combined.indexOf('comment') > -1) {
+      if (notesCol === -1) notesCol = c2;
+      continue;
+    }
+    if (colOf[combined] === undefined) colOf[combined] = c2;
+  }
+  return { twoRow: twoRow, dataStart: twoRow ? 3 : 2, colOf: colOf, notesCol: notesCol, lastCol: lastCol };
+}
+
+function _ensureDistrictShiftSheet_(ss, districts) {
+  var sh = ss.getSheetByName(SHEET_DISTRICT_SHIFTS);
+  if (sh) return sh;               // an existing sheet is used exactly as it stands
+  sh = ss.insertSheet(SHEET_DISTRICT_SHIFTS);
+  var r1 = ['Date'], r2 = [''];
+  districts.forEach(function(d){
+    DISTRICT_SHIFT_NAMES.forEach(function(sn, i){ r1.push(i === 0 ? d : ''); r2.push(sn); });
+  });
+  r1.push('Notes'); r2.push('');
+  sh.getRange(1, 1, 1, r1.length).setValues([r1]).setFontWeight('bold');
+  sh.getRange(2, 1, 1, r2.length).setValues([r2]).setFontWeight('bold');
+  sh.setFrozenRows(2);
+  sh.setFrozenColumns(1);
+  return sh;
+}
+
+function _normDateStr_(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return v.getFullYear() + '-' + pad2(v.getMonth() + 1) + '-' + pad2(v.getDate());
+  }
+  var t = String(v == null ? '' : v).trim();
+  if (!t) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.substring(0, 10);
+  // M/D/YYYY as the sheet displays it
+  var m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return m[3] + '-' + pad2(parseInt(m[1], 10)) + '-' + pad2(parseInt(m[2], 10));
+  var d = new Date(t);
+  if (!isNaN(d.getTime())) return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  return t.substring(0, 10);
+}
+
+function getDistrictShiftData(ss) {
+  try {
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    var sh = ss.getSheetByName(SHEET_DISTRICT_SHIFTS);
+    if (!sh) return { byDate: {}, shifts: DISTRICT_SHIFT_NAMES };
+    var lay = _dsLayout_(sh);
+    var all = sh.getDataRange().getValues();
+    if (all.length < lay.dataStart) return { byDate: {}, shifts: DISTRICT_SHIFT_NAMES, layout: lay.twoRow ? 'two-row' : 'single-row' };
+
+    var byDate = {};
+    for (var r = lay.dataStart - 1; r < all.length; r++) {
+      var ds = _normDateStr_(all[r][0]);
+      if (!ds) continue;
+      var rec = { values: {}, notes: lay.notesCol > -1 ? String(all[r][lay.notesCol] || '') : '', sheetRow: r + 1 };
+      for (var key in lay.colOf) {
+        if (!lay.colOf.hasOwnProperty(key)) continue;
+        rec.values[key] = safeNum(all[r][lay.colOf[key]]);
+      }
+      byDate[ds] = rec;
+    }
+    return { byDate: byDate, shifts: DISTRICT_SHIFT_NAMES, layout: lay.twoRow ? 'two-row' : 'single-row' };
+  } catch (e) { return { byDate: {}, shifts: DISTRICT_SHIFT_NAMES, error: e.message }; }
+}
+
+// Saves a day's shift figures exactly as entered, into whatever columns the
+// sheet already has, and mirrors the summed district totals into DISTRICT
+// DELIVERIES. A district whose three shifts are all blank is left alone there
+// rather than being overwritten with a zero.
+function saveDistrictShiftRow(payload) {
+  try {
+    if (!payload || !payload.dateStr) throw new Error('No date given.');
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var districts = _districtNames_(ss);
+    var sh = _ensureDistrictShiftSheet_(ss, districts);
+    var lay = _dsLayout_(sh);
+
+    var all = sh.getDataRange().getValues();
+    var target = -1;
+    for (var r = lay.dataStart - 1; r < all.length; r++) {
+      if (_normDateStr_(all[r][0]) === payload.dateStr) { target = r + 1; break; }
+    }
+    if (target === -1) {
+      target = Math.max(sh.getLastRow() + 1, lay.dataStart);
+      var parts = payload.dateStr.split('-');
+      sh.getRange(target, 1).setValue(
+        new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)));
+    }
+
+    var vals = payload.values || {};
+    var totals = [], unmatched = [];
+    districts.forEach(function(d){
+      var sum = 0, touched = false;
+      DISTRICT_SHIFT_NAMES.forEach(function(sn){
+        var key = _shiftKey_(d + ' ' + sn);
+        var raw = vals[key];
+        var n = safeNum(raw);
+        sum += n;
+        if (raw !== undefined && raw !== null && String(raw) !== '') touched = true;
+        var col = lay.colOf[key];
+        if (col !== undefined) sh.getRange(target, col + 1).setValue(n);
+        else unmatched.push(d + ' ' + sn);
+      });
+      totals.push({ district: d, total: sum, touched: touched });
+    });
+
+    if (lay.notesCol > -1) {
+      sh.getRange(target, lay.notesCol + 1).setValue(String(payload.notes || ''));
+    } else if (payload.notes) {
+      // No notes column in the sheet — add one rather than dropping the note.
+      var at = sh.getLastColumn() + 1;
+      sh.getRange(1, at).setValue('Notes').setFontWeight('bold');
+      sh.getRange(target, at).setValue(String(payload.notes));
+      lay.notesCol = at - 1;
+    }
+
+    var mirrored = 0, ddRow = 0;
+    var dd = ss.getSheetByName('DISTRICT DELIVERIES');
+    if (dd) {
+      // A day being planned ahead has no row yet, so make one. The row is
+      // located by date rather than trusting the caller's row number, which
+      // goes stale as soon as anything is inserted on the sheet.
+      ddRow = _ensureDistrictDeliveryRow_(dd, payload.dateStr);
+      var ddHdr = dd.getRange(1, 1, 1, Math.max(dd.getLastColumn(), 1)).getValues()[0];
+      for (var t = 0; t < totals.length; t++) {
+        if (!totals[t].touched && totals[t].total === 0) continue;
+        for (var c3 = 1; c3 < ddHdr.length; c3++) {
+          if (_shiftKey_(ddHdr[c3]) === _shiftKey_(totals[t].district)) {
+            dd.getRange(ddRow, c3 + 1).setValue(totals[t].total);
+            mirrored++;
+            break;
+          }
+        }
+      }
+      if (mirrored) _ddSyncTotal_(dd, ddRow, ddHdr);
+    }
+
+    SpreadsheetApp.flush();
+    _invalidateCache();
+    return { ok: true, totals: totals, mirrored: mirrored, row: target, ddRow: ddRow,
+             layout: lay.twoRow ? 'two-row' : 'single-row',
+             unmatched: unmatched.slice(0, 8), unmatchedCount: unmatched.length };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// Row number on DISTRICT DELIVERIES for a date, creating it if the day has no
+// row yet. A day being planned ahead has no row, so one is appended.
+function _ensureDistrictDeliveryRow_(dd, dateStr) {
+  var all = dd.getDataRange().getValues();
+  for (var r = 1; r < all.length; r++) {
+    if (_normDateStr_(all[r][0]) === dateStr) return r + 1;
+  }
+  var parts = dateStr.split('-');
+  var d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+  var row = dd.getLastRow() + 1;
+  dd.getRange(row, 1).setValue(d);
+  return row;
+}
+
+// Keeps the Total column honest after district values change. A Total held as
+// a formula is left alone — and copied down for a brand new row — so whatever
+// the sheet already does keeps working.
+function _ddSyncTotal_(dd, row, ddHdr) {
+  try {
+    var totCol = -1;
+    for (var c = 1; c < ddHdr.length; c++) {
+      if (String(ddHdr[c] || '').trim().toLowerCase() === 'total') { totCol = c + 1; break; }
+    }
+    if (totCol < 0) return;
+    var cell = dd.getRange(row, totCol);
+    if (cell.getFormula()) return;                       // the sheet computes it
+    if (row > 2) {
+      var above = dd.getRange(row - 1, totCol);
+      if (above.getFormula()) { above.copyTo(cell); return; }
+    }
+    var vals = dd.getRange(row, 2, 1, totCol - 2).getValues()[0];
+    var sum = 0;
+    for (var i = 0; i < vals.length; i++) sum += safeNum(vals[i]);
+    cell.setValue(sum);
+  } catch (e) {}
+}
+
 // WRITE-BACK — update a DISTRICT DELIVERIES row
 // sheetRow: 1-based row number; colIdxs: 1-based col numbers; values: matching array
 // ════════════════════════════════════════════════════════════
@@ -1433,6 +2542,87 @@ function fmtCellDate(val) {
 // Roles: super-admin | admin | editor | viewer
 // Status: approved (all users); sheet is auto-migrated on first call
 var SUPER_ADMINS = ['k.lanot@calo.app', 'a.mohamed@calo.app'];
+
+// ── PASSWORD STORAGE ─────────────────────────────────────────
+// Passwords used to sit in the sheet as typed, which meant anyone who could
+// open the file could read them — and people reuse passwords, so the damage
+// reached past this dashboard. What is stored now is a salted hash: a one-way
+// result that can confirm a password without revealing it.
+//
+// Format: s1$<rounds>$<salt>$<hash>. The round count travels with each hash,
+// so raising _PW_ROUNDS later leaves existing logins working.
+//
+// Honest limit: Apps Script has no bcrypt or Argon2, so this is iterated
+// SHA-256. Far weaker than a purpose-built password hash, immeasurably better
+// than plain text. Moving login to a managed identity service removes the
+// problem entirely, because then nothing is stored here at all.
+var _PW_ROUNDS = 2000;   // lower if login feels slow; old hashes keep working
+
+function _pwHash_(password, salt, rounds) {
+  var bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256, salt + '\u0000' + String(password), Utilities.Charset.UTF_8);
+  var key = Utilities.newBlob(salt).getBytes();
+  // Iterating on the raw bytes avoids a string conversion per round, which is
+  // what would actually make this slow.
+  for (var i = 0; i < rounds; i++) bytes = Utilities.computeHmacSha256Signature(bytes, key);
+  return Utilities.base64Encode(bytes);
+}
+
+function _pwMake_(password) {
+  var salt = Utilities.getUuid().replace(/-/g, '');
+  return 's1$' + _PW_ROUNDS + '$' + salt + '$' + _pwHash_(password, salt, _PW_ROUNDS);
+}
+
+function _pwIsHashed_(stored) {
+  return /^s1\$\d+\$[0-9a-f]{32}\$/.test(String(stored || ''));
+}
+
+// Compares without letting the time taken reveal how much of the value matched.
+function _pwEq_(a, b) {
+  a = String(a); b = String(b);
+  if (a.length !== b.length) return false;
+  var d = 0;
+  for (var i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+
+// legacy:true means the row still held a plain-text password. The caller
+// rewrites it as a hash, so accounts convert themselves as people sign in and
+// nobody is locked out or asked to reset.
+function _pwVerify_(password, stored) {
+  stored = String(stored || '');
+  if (!stored) return { ok: false, legacy: false };
+  if (!_pwIsHashed_(stored)) return { ok: _pwEq_(stored.trim(), String(password)), legacy: true };
+  var parts = stored.split('$');
+  var rounds = parseInt(parts[1], 10) || _PW_ROUNDS;
+  return { ok: _pwEq_(_pwHash_(password, parts[2], rounds), parts[3]), legacy: false };
+}
+
+// Writes a hash into column B as literal text, so the sheet cannot reinterpret it.
+function _pwWrite_(sheet, row, password) {
+  sheet.getRange(row, 2).setNumberFormat('@').setValue(_pwMake_(password));
+}
+
+// Reset tokens get hashed too. Left readable, they would let anyone with the
+// sheet open take over an account through the reset flow, which would undo the
+// point of hashing the passwords. One pass is enough here — a UUID has far more
+// entropy than a password, so there is nothing to guess at.
+function _tokHash_(token) {
+  return Utilities.base64Encode(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(token), Utilities.Charset.UTF_8));
+}
+
+function _tokMatches_(stored, token) {
+  stored = String(stored || '').trim();
+  if (!stored || !token) return false;
+  return _pwEq_(stored, _tokHash_(token)) || _pwEq_(stored, String(token));  // pre-hash tokens still work
+}
+
+function _tokWrite_(sheet, row, token, expiry) {
+  sheet.getRange(row, 4).setNumberFormat('@').setValue(_tokHash_(token));
+  sheet.getRange(row, 5).setValue(expiry.toISOString());
+}
+
 
 function _isSuperAdmin(email) {
   return SUPER_ADMINS.indexOf((email||'').trim().toLowerCase()) >= 0;
@@ -1492,7 +2682,8 @@ function registerUser(email, password) {
       }
     }
     var role = _isSuperAdmin(email) ? 'super-admin' : 'viewer';
-    sheet.appendRow([email, password, role, '', '', 'approved']);
+    sheet.appendRow([email, '', role, '', '', 'approved']);
+    _pwWrite_(sheet, sheet.getLastRow(), password);
     return {ok:true, role:role, email:email};
   } catch(e) { return {ok:false, err:e.message}; }
 }
@@ -1516,7 +2707,9 @@ function getUsers(callerEmail) {
         role:     String(rows[i][2]||'viewer').trim(),
         status:   String(rows[i][statusIdx]||'approved').trim() || 'approved',
         hasPass:  !!(String(rows[i][1]||'').trim()),
-        password: String(rows[i][1]||'').trim(),
+        // The password itself is never sent anywhere. secured says whether the
+        // row has been converted from plain text yet.
+        secured:  _pwIsHashed_(rows[i][1]),
         hasToken: !!(String(rows[i][3]||'').trim())
       });
     }
@@ -1568,8 +2761,10 @@ function changeOwnPassword(email, currentPass, newPass) {
     for (var i = 1; i < rows.length; i++) {
       if (String(rows[i][0]||'').trim().toLowerCase() !== email) continue;
       var stored = String(rows[i][1]||'').trim();
-      if (stored && stored !== currentPass) return {ok:false, err:'Current password is incorrect.'};
-      sheet.getRange(i+1,2).setValue(newPass);
+      if (stored && !_pwVerify_(currentPass, stored).ok) {
+        return {ok:false, err:'Current password is incorrect.'};
+      }
+      _pwWrite_(sheet, i+1, newPass);
       return {ok:true};
     }
     return {ok:false, err:'User not found.'};
@@ -1593,8 +2788,12 @@ function checkLogin(email, password) {
       if (rowStatus === 'rejected') return {ok:false, err:'Your access has been revoked. Contact your administrator.'};
       // New user — no password set yet
       if (!rowPass) return {ok: false, newUser: true, email: rowEmail};
-      if (rowPass === password) return {ok: true, role: rowRole, email: rowEmail};
-      return {ok: false};
+      var v = _pwVerify_(password, rowPass);
+      if (!v.ok) return {ok: false};
+      // Signing in with a password the sheet still held in the clear is the
+      // moment to replace it with a hash. Silent, and nobody has to reset.
+      if (v.legacy) { try { _pwWrite_(sheet, i+1, password); } catch (e) {} }
+      return {ok: true, role: rowRole, email: rowEmail};
     }
     return {ok: false};
   } catch(e) {
@@ -1632,7 +2831,7 @@ function setPassword(email, newPass) {
       if (rowEmail !== email.trim().toLowerCase()) continue;
       var rowPass = String(rows[i][1] || '').trim();
       if (rowPass) return {ok: false, err: 'Password already set. Use Forgot Password to reset.'};
-      sheet.getRange(i + 1, 2).setValue(newPass); // col B
+      _pwWrite_(sheet, i + 1, newPass); // col B — stored as a hash
       // Mark as approved when setting password for first time (Super Admin pre-seeded users)
       if (!String(rows[i][5]||'').trim()) sheet.getRange(i+1,6).setValue('approved');
       var rowRole = String(rows[i][2] || 'viewer').trim();
@@ -1655,8 +2854,7 @@ function sendPasswordReset(email) {
       // Generate token
       var token   = Utilities.getUuid();
       var expiry  = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-      sheet.getRange(i + 1, 4).setValue(token);  // col D
-      sheet.getRange(i + 1, 5).setValue(expiry.toISOString()); // col E
+      _tokWrite_(sheet, i + 1, token, expiry);  // cols D, E — token stored hashed
       // Build reset link — get the deployed web app URL
       var appUrl  = ScriptApp.getService().getUrl();
       var link    = appUrl + '?reset=' + token;
@@ -1666,7 +2864,7 @@ function sendPasswordReset(email) {
         htmlBody:
           '<p>Hi,</p>' +
           '<p>Click the link below to reset your password. This link expires in 1 hour.</p>' +
-          '<p><a href="' + link + '" style="background:#00B368;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset My Password</a></p>' +
+          '<p><a href="' + link + '" style="background:#00C07F;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset My Password</a></p>' +
           '<p>If you did not request this, ignore this email.</p>' +
           '<p>— CALO UMP Operations Dashboard</p>'
       });
@@ -1690,8 +2888,7 @@ function sendPasswordResetToAdmin(callerEmail, targetEmail) {
       if (rowEmail !== (targetEmail||'').trim().toLowerCase()) continue;
       var token  = Utilities.getUuid();
       var expiry = new Date(Date.now() + 60 * 60 * 1000);
-      sheet.getRange(i + 1, 4).setValue(token);
-      sheet.getRange(i + 1, 5).setValue(expiry.toISOString());
+      _tokWrite_(sheet, i + 1, token, expiry);
       var appUrl = ScriptApp.getService().getUrl();
       var link   = appUrl + '?reset=' + token;
       MailApp.sendEmail({
@@ -1700,7 +2897,7 @@ function sendPasswordResetToAdmin(callerEmail, targetEmail) {
         htmlBody:
           '<p>Hi Super Admin,</p>' +
           '<p>Here is the password reset link for <strong>' + targetEmail + '</strong>. Share it with the user or use it to set their password. Expires in 1 hour.</p>' +
-          '<p><a href="' + link + '" style="background:#00B368;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset Password for ' + targetEmail + '</a></p>' +
+          '<p><a href="' + link + '" style="background:#00C07F;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset Password for ' + targetEmail + '</a></p>' +
           '<p>— CALO UMP Operations Dashboard</p>'
       });
       return {ok: true};
@@ -1718,7 +2915,7 @@ function validateResetToken(token) {
     for (var i = 1; i < rows.length; i++) {
       var storedToken = String(rows[i][3] || '').trim();
       var expiryStr   = String(rows[i][4] || '').trim();
-      if (storedToken !== token) continue;
+      if (!_tokMatches_(storedToken, token)) continue;
       if (!expiryStr) return {ok: false, err: 'Token invalid.'};
       if (new Date() > new Date(expiryStr)) return {ok: false, err: 'Reset link has expired. Please request a new one.'};
       return {ok: true, email: String(rows[i][0]).trim().toLowerCase()};
@@ -1738,9 +2935,9 @@ function resetPasswordWithToken(token, newPass) {
     for (var i = 1; i < rows.length; i++) {
       var storedToken = String(rows[i][3] || '').trim();
       var expiryStr   = String(rows[i][4] || '').trim();
-      if (storedToken !== token) continue;
+      if (!_tokMatches_(storedToken, token)) continue;
       if (!expiryStr || new Date() > new Date(expiryStr)) return {ok: false, err: 'Reset link has expired.'};
-      sheet.getRange(i + 1, 2).setValue(newPass); // col B — new password
+      _pwWrite_(sheet, i + 1, newPass); // col B — new password, hashed
       sheet.getRange(i + 1, 4).setValue('');      // col D — clear token
       sheet.getRange(i + 1, 5).setValue('');      // col E — clear expiry
       var rowRole = String(rows[i][2] || 'viewer').trim();
@@ -1750,6 +2947,55 @@ function resetPasswordWithToken(token, newPass) {
   } catch(e) {
     return {ok: false, err: e.message};
   }
+}
+
+// How much of the sheet is still readable. Super Admin only.
+function auditPasswordStorage(callerEmail) {
+  try {
+    if (!_isSuperAdmin((callerEmail||'').trim().toLowerCase())) return {ok:false, err:'Not authorized.'};
+    var rows = _acSheet().getDataRange().getValues();
+    var hashed = 0, plain = 0, notSet = 0, plainEmails = [], tokens = 0;
+    for (var i = 1; i < rows.length; i++) {
+      var email = String(rows[i][0]||'').trim();
+      if (!email) continue;
+      var pw = String(rows[i][1]||'').trim();
+      if (!pw) notSet++;
+      else if (_pwIsHashed_(pw)) hashed++;
+      else { plain++; plainEmails.push(email); }
+      var tok = String(rows[i][3]||'').trim();
+      if (tok && !/^[A-Za-z0-9+\/]{43}=$/.test(tok)) tokens++;   // still a raw UUID
+    }
+    return {ok:true, hashed:hashed, plaintext:plain, notSet:notSet,
+            plaintextEmails:plainEmails, rawTokens:tokens,
+            allSecure:(plain === 0 && tokens === 0)};
+  } catch(e) { return {ok:false, err:e.message}; }
+}
+
+// Converts every remaining plain-text password in place. Everyone's existing
+// password keeps working — hashing what is already stored produces exactly what
+// their next login will be checked against. Super Admin only.
+function hashAllPlaintextPasswords(callerEmail) {
+  try {
+    if (!_isSuperAdmin((callerEmail||'').trim().toLowerCase())) return {ok:false, err:'Not authorized.'};
+    var sheet = _acSheet();
+    var rows = sheet.getDataRange().getValues();
+    var converted = 0, clearedTokens = 0;
+    for (var i = 1; i < rows.length; i++) {
+      if (!String(rows[i][0]||'').trim()) continue;
+      var pw = String(rows[i][1]||'').trim();
+      if (pw && !_pwIsHashed_(pw)) { _pwWrite_(sheet, i+1, pw); converted++; }
+      // Any reset link already in flight was issued against a readable token,
+      // so retire it rather than leave it usable.
+      var tok = String(rows[i][3]||'').trim();
+      if (tok && !/^[A-Za-z0-9+\/]{43}=$/.test(tok)) {
+        sheet.getRange(i+1, 4).setValue('');
+        sheet.getRange(i+1, 5).setValue('');
+        clearedTokens++;
+      }
+    }
+    SpreadsheetApp.flush();
+    return {ok:true, converted:converted, clearedTokens:clearedTokens};
+  } catch(e) { return {ok:false, err:e.message}; }
 }
 
 // ── COMMENTS ─────────────────────────────────────────────────
