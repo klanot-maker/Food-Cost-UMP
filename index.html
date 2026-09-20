@@ -888,31 +888,27 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
     <div class="sb-ttl">UMP Operations<br>Dashboard</div>
   </div>
   <nav class="sb-nav">
-    <button class="ni" onclick="showPage('operation')">
+    <button class="ni" data-page="operation" onclick="showPage('operation')">
       <span class="ni-emoji">🏭</span>
       <span class="ni-label">Operation Overview</span>
     </button>
-    <button class="ni" onclick="showPage('financial')">
+    <button class="ni" data-page="financial" onclick="showPage('financial')">
       <span class="ni-emoji">💰</span>
       <span class="ni-label">Financial Cost</span>
     </button>
-    <button class="ni" onclick="showPage('complaints')">
+    <button class="ni" data-page="complaints" onclick="showPage('complaints')">
       <span class="ni-emoji">📋</span>
       <span class="ni-label">UMP Complaints</span>
     </button>
-    <button class="ni" onclick="showPage('staff')">
+    <button class="ni" data-page="staff" onclick="showPage('staff')">
       <span class="ni-emoji">👷</span>
       <span class="ni-label">Production Staff</span>
     </button>
-    <button class="ni" onclick="showPage('leave')">
-      <span class="ni-emoji">🗓️</span>
-      <span class="ni-label">Annual Leave</span>
-    </button>
-    <button class="ni" onclick="showPage('capacity')">
+    <button class="ni" data-page="capacity" onclick="showPage('capacity')">
       <span class="ni-emoji">📊</span>
       <span class="ni-label">Capacity Overview</span>
     </button>
-    <button class="ni" onclick="showPage('logistics')">
+    <button class="ni" data-page="logistics" onclick="showPage('logistics')">
       <span class="ni-emoji">🚚</span>
       <span class="ni-label">Logistics</span>
     </button>
@@ -1156,15 +1152,6 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
           <tbody id="staffFullBody"></tbody>
         </table>
         <div class="tbl-foot"><span class="ftot" id="staffFullTot">—</span><span class="fcnt">All departments</span></div>
-      </div>
-    </div>
-
-    <!-- PAGE: ANNUAL LEAVE -->
-    <div class="page" id="page-leave">
-      <div class="placeholder">
-        <div class="ph-emoji">🗓️</div>
-        <h2>Annual Leave</h2>
-        <p>Connect your leave tracker spreadsheet to populate this page.</p>
       </div>
     </div>
 
@@ -1465,7 +1452,6 @@ var PAGE_TITLES = {
   financial:  'Financial Cost Analysis',
   complaints: 'UMP Complaints',
   staff:      'Production Staff Count',
-  leave:      'Annual Leave',
   capacity:   'Capacity Overview',
   operation:  'Operation Overview',
   logistics:  'Logistics Cost'
@@ -1503,13 +1489,19 @@ function toggleSidebar(){
 // ════════════════════════════════════════════════════════════
 // NAVIGATION
 // ════════════════════════════════════════════════════════════
-var NAV_ORDER = ['operation','financial','complaints','staff','leave','capacity','logistics'];
+var NAV_ORDER = ['operation','financial','complaints','staff','capacity','logistics'];
 function showPage(id) {
   _currentPage = id;
   document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active');});
   document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('act');});
-  document.getElementById('page-'+id).classList.add('active');
-  document.querySelectorAll('.ni')[NAV_ORDER.indexOf(id)].classList.add('act');
+  var _pg = document.getElementById('page-'+id);
+  if (!_pg) return;                    // a category that is no longer here
+  _pg.classList.add('active');
+  // Matched on the button's own page rather than its position in NAV_ORDER —
+  // the two used to have to stay in lockstep, so removing a category from one
+  // and not the other highlighted the wrong item or threw outright.
+  var _navBtn = document.querySelector('.ni[data-page="' + id + '"]');
+  if (_navBtn) _navBtn.classList.add('act');
   document.getElementById('pageTitle').textContent = PAGE_TITLES[id];
   // Restore the per-page filter label and re-render so Chart.js uses a visible canvas
   if(id==='financial'){
@@ -1988,7 +1980,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-08-25.a';
+var UMP_BUILD_UI='2026-09-20.a';
 var UMP_BUILD_SERVER=null;
 var _lgcEditMode=false;
 var _lgcEditingId=null;
@@ -2822,7 +2814,7 @@ function toggleCal(){
     if(pop.classList.contains('open')){ _initOpsDate(); renderOpsCalendar(); }
     return;
   }
-  if(page==='capacity'||page==='leave'){
+  if(page==='capacity'){
     return;
   }
   if(page==='financial'){
