@@ -32,7 +32,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-09-20.a';
+var UMP_BUILD    = '2026-09-28.a';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 // A cache entry is capped at ~100 KB, and the page payloads outgrew that: the
@@ -553,10 +553,17 @@ function getFinancialData(ss) {
       else if (inOther) other.push({ cat: lbl, vals: rowVals(r) });
     }
 
+    // A category listed twice used to keep the first row and throw the second's
+    // money away, quietly undercounting the total. The same name is the same
+    // line, so the two are added together instead. The '#' prefix keeps a
+    // category called "constructor" from colliding with Object's own keys.
     function dedupe(arr) {
-      var seen = {}, out = [];
+      var idx = {}, out = [];
       arr.forEach(function(item) {
-        if (!seen[item.cat]) { seen[item.cat] = true; out.push(item); }
+        var k = '#' + item.cat;
+        if (idx[k] === undefined) { idx[k] = out.length; out.push(item); return; }
+        var into = out[idx[k]].vals;
+        Object.keys(item.vals).forEach(function(m) { into[m] = (into[m] || 0) + item.vals[m]; });
       });
       return out;
     }
@@ -2520,9 +2527,21 @@ function pad2(n){ return String(n).length===1?'0'+n:String(n); }
 
 // ── HELPERS ───────────────────────────────────────────────────
 function safeNum(v) {
-  var s = String(v || '').replace(/[^0-9.\-]/g, '');
+  if (v === null || v === undefined) return 0;
+  if (typeof v === 'number') return isNaN(v) ? 0 : v;
+  // A date left in a value column used to strip down to its digits and come back
+  // as a number in the quadrillions, silently wrecking any total holding it.
+  if (v instanceof Date) return 0;
+  var s = String(v).trim();
+  if (!s) return 0;
+  // (500) and 500- both mean minus five hundred. Stripping the punctuation made
+  // them +500, so a credit was added to a cost instead of taken off it.
+  var neg = /^\(.*\)$/.test(s) || /-\s*$/.test(s);
+  s = s.replace(/[^0-9.\-]/g, '');
+  if (s.lastIndexOf('-') > 0) s = s.replace(/-/g, '');   // a minus anywhere but the front is noise
   var n = parseFloat(s);
-  return isNaN(n) ? 0 : n;
+  if (isNaN(n)) return 0;
+  return (neg && n > 0) ? -n : n;
 }
 
 function fmtCellDate(val) {

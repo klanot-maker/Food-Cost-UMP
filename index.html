@@ -1980,7 +1980,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-09-20.a';
+var UMP_BUILD_UI='2026-09-28.a';
 var UMP_BUILD_SERVER=null;
 var _lgcEditMode=false;
 var _lgcEditingId=null;
@@ -3092,14 +3092,26 @@ function renderFinancial(){
       var aed=activeMos.reduce(function(s,mo){return s+((c.vals&&c.vals[mo])||0);},0);
       var latestAed=(c.vals&&c.vals[latestMo])||0;
       var prevAed=prevMo!=null?((c.vals&&c.vals[prevMo])||0):null;
-      var growth=prevAed!==null&&prevAed>0?((latestAed-prevAed)/prevAed*100):null;
-      return {cat:c.cat, aed:Math.round(aed*100)/100, growth:growth};
+      return {cat:c.cat, aed:Math.round(aed*100)/100, latest:latestAed, prev:prevAed, growth:null};
     });
   }
-  // aggCats + deduplicate by category name (merge values if sheet sends duplicate rows)
+  // Merge rows sharing a category name, as the name here always said it did —
+  // it kept the first and dropped the second's money. Growth is worked out after
+  // merging, from the combined months, or it would describe only one of them.
+  // The '#' prefix keeps a category called "constructor" off Object's own keys.
   function dedupeCats(arr){
-    var seen={}, out=[];
-    arr.forEach(function(r){ if(!seen[r.cat]){seen[r.cat]=true;out.push(r);} });
+    var idx={}, out=[];
+    arr.forEach(function(r){
+      var k='#'+r.cat;
+      if(idx[k]===undefined){ idx[k]=out.length; out.push(r); return; }
+      var t=out[idx[k]];
+      t.aed=Math.round((t.aed+r.aed)*100)/100;
+      t.latest+=r.latest;
+      if(t.prev!==null&&r.prev!==null) t.prev+=r.prev;
+    });
+    out.forEach(function(r){
+      r.growth=(r.prev!==null&&r.prev>0)?((r.latest-r.prev)/r.prev*100):null;
+    });
     return out;
   }
   var wData=dedupeCats(aggCats(fin.wastage)), oData=dedupeCats(aggCats(fin.other));
