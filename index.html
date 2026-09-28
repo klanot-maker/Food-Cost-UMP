@@ -512,6 +512,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 .um-pw-state.plain{background:#FDECEC;color:#B3261E;border:1px solid #F3C9C6;}
 .sb-build{margin-top:7px;font-size:9.5px;font-weight:700;letter-spacing:.06em;color:rgba(255,255,255,.62);font-family:'Lato',sans-serif;}
 .sb-build.warn{color:#FFE08A;}
+.ops-manpower-note{font-size:11px;font-weight:600;margin-top:4px;}
 .dd-pending{display:inline-block;margin-left:6px;background:var(--brl);color:var(--brd);border:1px solid var(--border);border-radius:10px;padding:1px 7px;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;vertical-align:middle;}
 .ddp-wrap{position:relative;display:inline-block;}
 .ddp-btn{display:flex;align-items:center;gap:7px;background:#fff;border:1.5px solid var(--border);border-radius:22px;padding:6px 14px;font-size:12.5px;font-weight:700;color:var(--txt);cursor:pointer;font-family:'Lato',sans-serif;transition:border-color .15s;}
@@ -1338,6 +1339,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
                 <div style="font-size:9.5px;font-weight:700;color:var(--lt);text-transform:uppercase;letter-spacing:.09em;margin-bottom:4px;">👥 Total On Duty</div>
                 <div class="ops-manpower-total" id="opsManpowerTotal">—</div>
                 <div class="ops-manpower-period" id="opsManpowerDate">—</div>
+                <div class="ops-manpower-note" id="opsManpowerNote" style="display:none;"></div>
               </div>
               <div style="text-align:right;">
                 <div style="font-size:9px;color:var(--lt);text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:4px;">Summary</div>
@@ -1983,7 +1985,16 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-09-28.b';
+var UMP_BUILD_UI='2026-09-28.c';
+// Manpower is built from the staff phase, which lands separately from the
+// Operation Overview phase. Without knowing which state that phase is in, an
+// empty card looked identical whether the data was still coming, had failed to
+// come, or genuinely held zeros.
+var _staffPhase='loading';   // loading | ready | failed
+// loadFallbackData() seeds DATA.staff with demo sections, so "the staff data is
+// not here" and "the staff data has no rows for this day" looked identical —
+// both produced an empty card, and the demo figures could be shown as real.
+var _staffIsReal=false;
 // Printed in the sidebar so the build actually being served is never in doubt.
 // Saving in the editor does not change what the web app serves, and chasing a
 // change that was never deployed has cost more time than anything else here.
@@ -2575,6 +2586,9 @@ function _renderOpsForDate(ds, endDs){
   // Filter manpower — average across range
   var staffData=ops.staffToday||{depts:[]};
   var allStaffSections=(DATA.staff&&DATA.staff.sections)||[];
+  var _staffNote = (_staffPhase==='failed')
+    ? 'Staff data could not be loaded \u2014 press Refresh.'
+    : ((!_staffIsReal && _staffPhase==='loading') ? 'Loading staff data\u2026' : '');
   // Convert range to set of dd-format strings for matching
   var _DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   var _rangeSelFmts={};
@@ -2606,6 +2620,7 @@ function _renderOpsForDate(ds, endDs){
   var rangeLabel=ds===endDs?
     (function(){var p=ds.split('-');var d=new Date(parseInt(p[0]),parseInt(p[1])-1,parseInt(p[2]));return d.getDate()+' '+MO_SHT[d.getMonth()]+' '+_DAYS[d.getDay()];})()
     :'Range avg';
+  _mpPendingNote=_staffNote;
   _renderManpowerDepts(depts, rangeLabel);
 
   // DOD: sum across range
@@ -2622,6 +2637,7 @@ function _fmtHeroDate(ds){
   return d.getDate()+' '+MO_SHT[d.getMonth()]+' '+d.getFullYear()+' ('+days[d.getDay()]+')';
 }
 
+var _mpPendingNote='';
 function _renderManpowerDepts(depts, dateLabel){
   // Deduplicate: if a dept appears twice (e.g. one entry with data for the
   // selected date and one without), keep the one that has data.
@@ -2643,6 +2659,13 @@ function _renderManpowerDepts(depts, dateLabel){
   });
   document.getElementById('opsManpowerTotal').textContent=totalOnDuty||'—';
   document.getElementById('opsManpowerDate').textContent=dateLabel?'Delivery date: '+dateLabel:'—';
+  var _mpNote=document.getElementById('opsManpowerNote');
+  if(_mpNote){
+    var msg=(typeof _mpPendingNote==='string')?_mpPendingNote:'';
+    _mpNote.textContent=msg;
+    _mpNote.style.display=msg?'block':'none';
+    _mpNote.style.color=(_staffPhase==='failed')?'var(--red)':'var(--mut)';
+  }
   var chipHtml='';
   if(totalAL>0)  chipHtml+='<div style="background:#FEF5E7;border:1px solid #C07A10;border-radius:12px;padding:3px 10px;font-size:10px;font-weight:700;color:#C07A10;">AL: '+totalAL+'</div>';
   if(totalSick>0)chipHtml+='<div style="background:#FEF0F0;border:1px solid #D94040;border-radius:12px;padding:3px 10px;font-size:10px;font-weight:700;color:#D94040;">Sick: '+totalSick+'</div>';
@@ -5119,7 +5142,9 @@ function refreshData(){
   // or a row typed straight into the sheet would not appear until it expired.
   google.script.run.withSuccessHandler(function(r){_rp.cap=r;_rMerge();}).withFailureHandler(_rFail).getCapacityPageData(true);
   google.script.run.withSuccessHandler(function(r){_rp.fin=r;_rMerge();}).withFailureHandler(_rFail).getFinancialComplaintsData(true);
-  google.script.run.withSuccessHandler(function(r){_rp.staff=r;_rMerge();}).withFailureHandler(_rFail).getStaffPageData(true);
+  google.script.run.withSuccessHandler(function(r){
+    _rp.staff=r; _staffPhase=(r&&r.staff&&r.staff.sections)?'ready':'failed'; _rMerge();
+  }).withFailureHandler(function(e){ _staffPhase='failed'; _rFail(e); }).getStaffPageData(true);
   google.script.run.withSuccessHandler(function(r){_rp.ops=r;_rMerge();}).withFailureHandler(_rFail).getOperationOverviewData(true);
 }
 
@@ -5958,6 +5983,7 @@ function init(){
   var cached = _lcLoad();
   var _haveCached = !!cached;
   if(cached){
+    if(cached.staff&&cached.staff.sections) _staffIsReal=true;   // stale, but genuine
     _applyData(cached);
     document.getElementById('loadingTxt').textContent='Refreshing data…';
   } else {
@@ -6018,8 +6044,19 @@ function init(){
     .getFinancialComplaintsData();
 
   google.script.run
-    .withSuccessHandler(function(r){ _phases.staff=r; _tryMerge(); })
-    .withFailureHandler(_fail('staff'))
+    .withSuccessHandler(function(r){
+      _phases.staff=r;
+      _staffPhase=(r&&r.staff&&r.staff.sections)?'ready':'failed';
+      // Manpower reads the staff phase, so Operation Overview has to be drawn
+      // again once it arrives. Waiting for all four left the card empty in the
+      // meantime, which looked exactly like there being no staff on duty.
+      if(r&&r.staff){ DATA.staff=r.staff; DATA.staffSummary=r.staffSummary; _staffIsReal=true; }
+      if(DATA.opsOverview) renderOperationOverview(DATA.opsOverview);
+      _tryMerge();
+    })
+    .withFailureHandler(function(e){ _staffPhase='failed';
+      if(DATA.opsOverview) renderOperationOverview(DATA.opsOverview);
+      _fail('staff')(e); })
     .getStaffPageData();
 
   google.script.run
