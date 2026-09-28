@@ -514,29 +514,14 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 .sb-build.warn{color:#FFE08A;}
 /* ══ OPERATION OVERVIEW BOARD ══════════════════════════════ */
 #page-operation{--opb-line:#E3E9EC;--opb-ink:#1A2B26;--opb-mut:#6B7C77;--opb-card:#FFFFFF;}
-.opb-hero{
-  background:linear-gradient(105deg,#0C3A2E 0%,#124B3B 55%,#166048 100%);
-  border-radius:14px;padding:18px 24px;margin-bottom:16px;
-  display:flex;align-items:center;gap:20px;flex-wrap:wrap;color:#fff;
-}
-.opb-brand{flex:0 0 auto;}
-.opb-wordmark{font-size:22px;font-weight:900;letter-spacing:.22em;line-height:1;color:#fff;}
-.opb-brandsub{font-size:8.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.6);margin-top:4px;}
-.opb-hero-rule{width:1px;align-self:stretch;background:rgba(255,255,255,.22);}
-.opb-titles{flex:1 1 220px;min-width:0;}
-.opb-title{font-size:23px;font-weight:800;letter-spacing:-.01em;line-height:1.15;}
-.opb-subtitle{font-size:12px;color:rgba(255,255,255,.66);margin-top:2px;font-weight:600;}
-.opb-hero-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
-.opb-datechip{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);
-  border-radius:10px;padding:7px 13px;font-size:12.5px;font-weight:700;line-height:1.2;}
-.opb-datechip-ico{font-size:14px;opacity:.9;}
-.opb-datechip-w{display:block;font-size:9.5px;font-weight:600;color:rgba(255,255,255,.62);}
-.opb-toggle{display:flex;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:10px;padding:3px;gap:3px;}
-.opb-tg{background:none;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:700;
-  color:rgba(255,255,255,.78);cursor:pointer;font-family:'Lato',sans-serif;transition:background .15s,color .15s;}
-.opb-tg.act{background:#fff;color:#0C3A2E;}
-.opb-tg:not(.act):hover{color:#fff;}
-
+.opb-viewbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap;}
+.opb-viewbar-date{font-size:13px;font-weight:800;color:var(--opb-ink);display:flex;align-items:baseline;gap:8px;}
+.opb-viewbar-day{font-size:11px;font-weight:600;color:var(--opb-mut);}
+.opb-toggle{display:flex;background:#EFF3F4;border:1px solid var(--opb-line);border-radius:10px;padding:3px;gap:3px;}
+.opb-tg{background:none;border:none;border-radius:7px;padding:6px 15px;font-size:12px;font-weight:700;
+  color:var(--opb-mut);cursor:pointer;font-family:'Lato',sans-serif;transition:background .15s,color .15s;}
+.opb-tg.act{background:#0C3A2E;color:#fff;}
+.opb-tg:not(.act):hover{color:var(--opb-ink);}
 .opb-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px;}
 .opb-kpi{background:var(--opb-card);border:1px solid var(--opb-line);border-radius:12px;padding:15px 16px;min-width:0;}
 .opb-kpi-hd{display:flex;align-items:center;gap:9px;margin-bottom:10px;}
@@ -617,8 +602,58 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 @media (max-width:640px){
   .opb-kpis{grid-template-columns:repeat(2,1fr);}
   .opb-ready{grid-template-columns:1fr;}
-  .opb-hero{gap:12px;} .opb-hero-rule{display:none;}
+
 }
+/* ══ MANPOWER BOARD ═══════════════════════════════════════ */
+.mpb-topline{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap;}
+.mpb-sum{display:flex;align-items:center;gap:22px;flex-wrap:wrap;background:#F4FAF7;border:1px solid #D9EDE4;
+  border-radius:12px;padding:15px 20px;margin-bottom:14px;}
+.mpb-sum-ico{width:48px;height:48px;border-radius:50%;background:#0F8A5F;color:#fff;display:flex;
+  align-items:center;justify-content:center;font-size:22px;flex:0 0 auto;}
+.mpb-sum-cell{display:flex;flex-direction:column;gap:2px;padding-right:22px;border-right:1px solid #DCE9E4;}
+.mpb-sum-cell:last-of-type{border-right:0;}
+.mpb-sum-l{font-size:11.5px;font-weight:700;color:var(--opb-mut);}
+.mpb-sum-v{font-size:27px;font-weight:800;color:var(--opb-ink);line-height:1;font-variant-numeric:tabular-nums;}
+.mpb-sum-v.neg{color:#C4761A;} .mpb-sum-v.pos{color:#0F8A5F;}
+.mpb-sum-cov{display:flex;align-items:center;gap:12px;flex:1 1 200px;min-width:170px;}
+.mpb-cov-bar{flex:1;height:9px;border-radius:5px;background:#E2ECE8;overflow:hidden;min-width:70px;}
+.mpb-cov-fill{height:100%;border-radius:5px;background:#0F8A5F;transition:width .4s;}
+.mpb-cov-fill.warn{background:#E0921F;}
+.mpb-sum-flag{margin-left:auto;background:#FEF7EC;border:1px solid #F1D9B4;border-radius:10px;padding:9px 14px;
+  display:flex;gap:9px;align-items:flex-start;max-width:290px;}
+.mpb-sum-flag.ok{background:#EFFAF5;border-color:#CCEDDF;}
+.mpb-flag-t{font-size:12px;font-weight:800;color:#A3610F;line-height:1.3;}
+.mpb-sum-flag.ok .mpb-flag-t{color:#00764F;}
+.mpb-flag-s{font-size:10.5px;color:var(--opb-mut);font-weight:600;margin-top:2px;}
+
+.mpb-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+.mpb-card{background:#fff;border:1px solid var(--opb-line);border-radius:12px;overflow:hidden;min-width:0;
+  box-shadow:0 1px 3px rgba(20,40,34,.05);}
+.mpb-card-top{height:4px;}
+.mpb-card-in{padding:14px 15px 15px;}
+.mpb-card-hd{display:flex;align-items:center;gap:11px;margin-bottom:14px;}
+.mpb-card-ico{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:17px;color:#fff;flex:0 0 auto;}
+.mpb-card-nm{font-size:14.5px;font-weight:800;color:var(--opb-ink);line-height:1.2;}
+.mpb-card-sub{font-size:10.5px;color:var(--opb-mut);font-weight:600;margin-top:1px;}
+.mpb-stats{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid #EEF3F1;border-bottom:1px solid #EEF3F1;}
+.mpb-stat{padding:11px 4px;text-align:left;border-right:1px solid #EEF3F1;}
+.mpb-stat:last-child{border-right:0;}
+.mpb-stat-v{font-size:22px;font-weight:800;color:var(--opb-ink);line-height:1;font-variant-numeric:tabular-nums;}
+.mpb-stat-v.neg{color:#C4761A;} .mpb-stat-v.pos{color:#0F8A5F;}
+.mpb-stat-l{font-size:10px;color:var(--opb-mut);font-weight:600;margin-top:4px;}
+.mpb-covrow{margin-top:12px;}
+.mpb-covrow-l{font-size:10.5px;color:var(--opb-mut);font-weight:700;margin-bottom:4px;}
+.mpb-covrow-b{display:flex;align-items:center;gap:10px;}
+.mpb-covrow-v{font-size:14px;font-weight:800;color:var(--opb-ink);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.mpb-status{margin-top:12px;border-radius:9px;padding:9px 12px;display:flex;gap:8px;align-items:flex-start;}
+.mpb-status.ok{background:#EFFAF5;} .mpb-status.warn{background:#FEF7EC;}
+.mpb-status-t{font-size:11.5px;font-weight:800;line-height:1.3;}
+.mpb-status.ok .mpb-status-t{color:#00764F;} .mpb-status.warn .mpb-status-t{color:#A3610F;}
+.mpb-status-s{font-size:10px;color:var(--opb-mut);font-weight:600;margin-top:1px;}
+.mpb-stale{font-size:8.5px;font-weight:700;color:var(--opb-mut);text-transform:uppercase;letter-spacing:.06em;}
+@media (max-width:1180px){ .mpb-grid{grid-template-columns:repeat(2,1fr);} }
+@media (max-width:640px){ .mpb-grid{grid-template-columns:1fr;} .mpb-sum{gap:14px;} .mpb-sum-flag{margin-left:0;} }
 .ops-manpower-note{font-size:11px;font-weight:600;margin-top:4px;}
 .dd-pending{display:inline-block;margin-left:6px;background:var(--brl);color:var(--brd);border:1px solid var(--border);border-radius:10px;padding:1px 7px;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;vertical-align:middle;}
 .ddp-wrap{position:relative;display:inline-block;}
@@ -1414,26 +1449,13 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
     <!-- PAGE: OPERATION OVERVIEW -->
     <div class="page" id="page-operation">
 
-      <!-- ── HERO BANNER ── -->
-      <div class="opb-hero">
-        <div class="opb-brand">
-          <div class="opb-wordmark">CALO</div>
-          <div class="opb-brandsub">UAE Operations</div>
-        </div>
-        <div class="opb-hero-rule"></div>
-        <div class="opb-titles">
-          <div class="opb-title">Operation Overview</div>
-          <div class="opb-subtitle">UAE Central Kitchen</div>
-        </div>
-        <div class="opb-hero-right">
-          <div class="opb-datechip">
-            <span class="opb-datechip-ico">&#128197;</span>
-            <span><span class="opb-datechip-d" id="opbDate">&mdash;</span><span class="opb-datechip-w" id="opbDay"></span></span>
-          </div>
-          <div class="opb-toggle">
-            <button class="opb-tg act" id="opbTgBoard" onclick="_opbView('board')">Board View</button>
-            <button class="opb-tg" id="opbTgOps" onclick="_opbView('ops')">Operations View</button>
-          </div>
+      <!-- The page title, date and refresh already sit in the top bar, so the
+           view switch is all this row needs to carry. -->
+      <div class="opb-viewbar">
+        <div class="opb-viewbar-date"><span id="opbDate">&mdash;</span><span class="opb-viewbar-day" id="opbDay"></span></div>
+        <div class="opb-toggle">
+          <button class="opb-tg act" id="opbTgBoard" onclick="_opbView('board')">Board View</button>
+          <button class="opb-tg" id="opbTgOps" onclick="_opbView('ops')">Operations View</button>
         </div>
       </div>
 
@@ -1530,22 +1552,16 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
         </div>
 
         <div id="opbDetailManpower" style="display:none;">
-          <div class="ops-manpower-card" id="opsManpowerCard">
-            <div class="ops-manpower-hdr">
-              <div>
-                <div style="font-size:9.5px;font-weight:700;color:var(--lt);text-transform:uppercase;letter-spacing:.09em;margin-bottom:4px;">&#128101; Total On Duty</div>
-                <div class="ops-manpower-total" id="opsManpowerTotal">&mdash;</div>
-                <div class="ops-manpower-period" id="opsManpowerDate">&mdash;</div>
-                <div class="ops-manpower-note" id="opsManpowerNote" style="display:none;"></div>
-              </div>
-              <div style="text-align:right;">
-                <div style="font-size:9px;color:var(--lt);text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:4px;">Summary</div>
-                <div id="opsManpowerSummaryChips" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;"></div>
-              </div>
+          <div class="mpb-topline">
+            <div>
+              <div class="ops-manpower-period" id="opsManpowerDate">&mdash;</div>
+              <div class="ops-manpower-note" id="opsManpowerNote" style="display:none;"></div>
             </div>
-            <div class="ops-dept-grid" id="opsDeptGrid" style="grid-template-columns:repeat(2,1fr);">
-              <div style="grid-column:1/-1;color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">Loading manpower data&hellip;</div>
-            </div>
+            <div id="opsManpowerSummaryChips" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;"></div>
+          </div>
+          <div id="opsMpSummary"></div>
+          <div class="mpb-grid" id="opsDeptGrid">
+            <div style="grid-column:1/-1;color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">Loading manpower data&hellip;</div>
           </div>
         </div>
 
@@ -2189,7 +2205,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-09-28.d';
+var UMP_BUILD_UI='2026-09-28.e';
 // Manpower is built from the staff phase, which lands separately from the
 // Operation Overview phase. Without knowing which state that phase is in, an
 // empty card looked identical whether the data was still coming, had failed to
@@ -3089,26 +3105,29 @@ function _opbCharts(ds, byDate, target){
 
 var _mpPendingNote='';
 function _renderManpowerDepts(depts, dateLabel){
-  // Deduplicate: if a dept appears twice (e.g. one entry with data for the
-  // selected date and one without), keep the one that has data.
-  // The key is trimmed + whitespace-collapsed + lowercased so the same
-  // department spelled differently across monthly sheets ("Kitchen Staff"
-  // vs "KITCHEN STAFF ") merges into a single card instead of duplicating.
+  // One card per department, keyed on a normalised name so the same department
+  // spelled differently across monthly sheets merges instead of duplicating.
   var seen={};
-  depts.forEach(function(d){
+  (depts||[]).forEach(function(d){
     var key=String(d.name||'').trim().replace(/\s+/g,' ').toLowerCase();
     if(!key) return;
     if(!seen[key]||(d.hasToday&&!seen[key].hasToday)) seen[key]=d;
   });
-  var dedupedDepts=Object.keys(seen).map(function(k){return seen[k];});
+  var dd=Object.keys(seen).map(function(k){return seen[k];});
 
-  var totalOnDuty=0,totalAL=0,totalSick=0,totalSup=0,totalOff=0;
-  dedupedDepts.forEach(function(d){
-    totalOnDuty+=d.row.on||0; totalAL+=d.row.al||0;
-    totalSick+=d.row.sl||0;   totalSup+=d.row.sup||0; totalOff+=d.row.off||0;
+  // Working headcount is on duty plus suppliers; the roster it is measured
+  // against is permanent staff, which is what on duty, off duty and the two
+  // kinds of leave add back up to.
+  var tOn=0,tReq=0,tAl=0,tSick=0;
+  dd.forEach(function(d){
+    var r=d.row||{};
+    tOn+=(r.on||0)+(r.sup||0); tReq+=r.ps||0; tAl+=r.al||0; tSick+=r.sl||0;
   });
-  document.getElementById('opsManpowerTotal').textContent=totalOnDuty||'—';
-  document.getElementById('opsManpowerDate').textContent=dateLabel?'Delivery date: '+dateLabel:'—';
+  var tGap=tOn-tReq;
+  var tCov=tReq>0?(tOn/tReq*100):0;
+
+  var dateEl=document.getElementById('opsManpowerDate');
+  if(dateEl) dateEl.textContent=dateLabel?'Delivery date: '+dateLabel:'—';
   var _mpNote=document.getElementById('opsManpowerNote');
   if(_mpNote){
     var msg=(typeof _mpPendingNote==='string')?_mpPendingNote:'';
@@ -3116,48 +3135,95 @@ function _renderManpowerDepts(depts, dateLabel){
     _mpNote.style.display=msg?'block':'none';
     _mpNote.style.color=(_staffPhase==='failed')?'var(--red)':'var(--mut)';
   }
-  var chipHtml='';
-  if(totalAL>0)  chipHtml+='<div style="background:#FEF5E7;border:1px solid #C07A10;border-radius:12px;padding:3px 10px;font-size:10px;font-weight:700;color:#C07A10;">AL: '+totalAL+'</div>';
-  if(totalSick>0)chipHtml+='<div style="background:#FEF0F0;border:1px solid #D94040;border-radius:12px;padding:3px 10px;font-size:10px;font-weight:700;color:#D94040;">Sick: '+totalSick+'</div>';
-  if(totalOff>0) chipHtml+='<div style="background:#F0F4F2;border:1px solid #A5A5A5;border-radius:12px;padding:3px 10px;font-size:10px;font-weight:700;color:#7A7A7A;">Off: '+totalOff+'</div>';
-  if(totalSup>0) chipHtml+='<div style="background:#F3EEF9;border:1px solid #9B59B6;border-radius:12px;padding:3px 10px;font-size:10px;font-weight:700;color:#9B59B6;">Supplier: '+totalSup+'</div>';
-  document.getElementById('opsManpowerSummaryChips').innerHTML=chipHtml||'<span style="font-size:10px;color:var(--lt)">—</span>';
-  var deptHtml='';
-  if(!dedupedDepts.length){
-    deptHtml='<div style="grid-column:1/-1;color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">No staff data for this date.</div>';
-  } else {
-    var maxOn=Math.max.apply(null,dedupedDepts.map(function(d){return(d.row.on||0)+(d.row.sup||0);}));
-    var maxPs=Math.max.apply(null,dedupedDepts.map(function(d){return d.row.ps||0;}));
-    if(!maxOn) maxOn=1; if(!maxPs) maxPs=1;
-    function miniBar(val,max,color,label){
-      var pct=Math.round((val/max)*100);
-      return '<div style="margin-top:6px;">'
-        +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">'
-        +'<span style="font-size:9px;font-weight:600;color:var(--lt);text-transform:uppercase;letter-spacing:.06em;">'+label+'</span>'
-        +'<span style="font-size:10px;font-weight:700;color:'+color+';">'+val+'</span>'
-        +'</div>'
-        +'<div style="background:rgba(0,0,0,0.07);border-radius:4px;height:6px;overflow:hidden;">'
-        +'<div style="width:'+pct+'%;height:100%;background:'+color+';border-radius:4px;transition:width .4s;"></div>'
-        +'</div></div>';
-    }
-    dedupedDepts.forEach(function(d){
-      var col=_deptColorOps(d.name),r=d.row;
-      var combined=(r.on||0)+(r.sup||0);
-      deptHtml+='<div class="ops-dept-card-lb" style="border-left-color:'+col+';">'
-        +'<div class="ops-dept-name">'+deptEmoji(d.name)+' '+d.name+(d.hasToday?'':' <span style="font-size:8px;color:var(--lt);font-weight:400">(last)</span>')+'</div>'
-        +'<div class="ops-dept-total" style="color:'+col+';">'+combined+'</div>'
-        +'<div class="ops-dept-sub">'
-        +'<div class="ops-dept-sub-item"><div class="ops-dept-sub-lbl">Ann. Leave</div><div class="ops-dept-sub-val">'+(r.al||0)+'</div></div>'
-        +'<div class="ops-dept-sub-item"><div class="ops-dept-sub-lbl">Sick Leave</div><div class="ops-dept-sub-val">'+(r.sl||0)+'</div></div>'
-        +'<div class="ops-dept-sub-item"><div class="ops-dept-sub-lbl">Off Duty / PH</div><div class="ops-dept-sub-val">'+(r.off||0)+'</div></div>'
-        +'<div class="ops-dept-sub-item"><div class="ops-dept-sub-lbl">Supplier</div><div class="ops-dept-sub-val" style="color:#9B59B6;">'+(r.sup||0)+'</div></div>'
-        +'</div>'
-        +miniBar(r.on||0, maxOn, col, 'On Duty')
-        +miniBar(r.ps||0, maxPs, '#9B59B6', 'Permanent Staff')
-        +'</div>';
-    });
+  var chips=document.getElementById('opsManpowerSummaryChips');
+  if(chips){
+    var tSup=0,tOff=0; dd.forEach(function(d){tSup+=d.row.sup||0;tOff+=d.row.off||0;});
+    var c='';
+    if(tAl>0)   c+='<div class="ops-chip-al">AL: '+tAl+'</div>';
+    if(tSick>0) c+='<div class="ops-chip-sick">Sick: '+tSick+'</div>';
+    if(tOff>0)  c+='<div class="ops-chip-off">Off: '+tOff+'</div>';
+    if(tSup>0)  c+='<div class="ops-chip-sup">Supplier: '+tSup+'</div>';
+    chips.innerHTML=c;
   }
-  document.getElementById('opsDeptGrid').innerHTML=deptHtml;
+
+  var grid=document.getElementById('opsDeptGrid');
+  if(!grid) return;
+  var sumEl=document.getElementById('opsMpSummary');
+  if(!dd.length){
+    if(sumEl) sumEl.innerHTML='<div class="mpb-sum"><div class="mpb-sum-ico">&#128101;</div>'
+      +'<div class="mpb-sum-cell"><span class="mpb-sum-l">Total Staff</span>'
+      +'<span class="mpb-sum-v" id="opsManpowerTotal">&mdash;</span></div></div>';
+    grid.innerHTML='<div style="grid-column:1/-1;color:var(--lt);font-size:12px;padding:16px 0;text-align:center;">No manpower data for this date.</div>';
+    return;
+  }
+
+  // The department that is furthest short, named on the summary flag.
+  var worst=null;
+  dd.forEach(function(d){
+    var r=d.row||{}, g=((r.on||0)+(r.sup||0))-(r.ps||0);
+    if(g<0&&(!worst||g<worst.gap)) worst={name:d.name,gap:g};
+  });
+
+  var sum='<div class="mpb-sum">'
+    +'<div class="mpb-sum-ico">&#128101;</div>'
+    +'<div class="mpb-sum-cell"><span class="mpb-sum-l">Total Staff</span>'
+      +'<span class="mpb-sum-v" id="opsManpowerTotal">'+(tOn||'\u2014')+'</span></div>'
+    +'<div class="mpb-sum-cell"><span class="mpb-sum-l">Required</span><span class="mpb-sum-v">'+tReq+'</span></div>'
+    +'<div class="mpb-sum-cell"><span class="mpb-sum-l">Gap</span><span class="mpb-sum-v '+(tGap<0?'neg':'pos')+'">'
+      +(tGap>0?'+':'')+tGap+'</span></div>'
+    +'<div class="mpb-sum-cov">'
+      +'<div><div class="mpb-sum-l">Coverage</div><div class="mpb-sum-v">'+tCov.toFixed(1)+'%</div></div>'
+      +'<div class="mpb-cov-bar"><div class="mpb-cov-fill'+(tGap<0?' warn':'')+'" style="width:'+Math.max(0,Math.min(100,tCov))+'%"></div></div>'
+    +'</div>'
+    +(tGap<0
+      ? '<div class="mpb-sum-flag"><span>&#9888;</span><div><div class="mpb-flag-t">'+Math.abs(tGap)+' staff gap</div>'
+        +'<div class="mpb-flag-s">'+(worst?('Mainly in '+worst.name):'Across departments')+'</div></div></div>'
+      : '<div class="mpb-sum-flag ok"><span>&#9989;</span><div><div class="mpb-flag-t">Fully covered</div>'
+        +'<div class="mpb-flag-s">Every department at or above roster</div></div></div>')
+    +'</div>';
+
+  var html='';
+  dd.forEach(function(d){
+    var r=d.row||{}, col=_deptColorOps(d.name);
+    var on=(r.on||0)+(r.sup||0), req=r.ps||0, gap=on-req;
+    var cov=req>0?(on/req*100):0;
+    var short=gap<0;
+    html+='<div class="mpb-card">'
+      +'<div class="mpb-card-top" style="background:'+col+';"></div>'
+      +'<div class="mpb-card-in">'
+        +'<div class="mpb-card-hd">'
+          +'<div class="mpb-card-ico" style="background:'+col+';">'+deptEmoji(d.name)+'</div>'
+          +'<div><div class="mpb-card-nm">'+d.name+(d.hasToday?'':' <span class="mpb-stale">(last)</span>')+'</div>'
+          +'<div class="mpb-card-sub">'+_deptRole(d.name)+'</div></div>'
+        +'</div>'
+        +'<div class="mpb-stats">'
+          +'<div class="mpb-stat"><div class="mpb-stat-v">'+on+'</div><div class="mpb-stat-l">On Duty</div></div>'
+          +'<div class="mpb-stat"><div class="mpb-stat-v">'+req+'</div><div class="mpb-stat-l">Required</div></div>'
+          +'<div class="mpb-stat"><div class="mpb-stat-v '+(short?'neg':'pos')+'">'+(gap>0?'+':'')+gap+'</div><div class="mpb-stat-l">Gap</div></div>'
+        +'</div>'
+        +'<div class="mpb-covrow"><div class="mpb-covrow-l">Coverage</div>'
+          +'<div class="mpb-covrow-b"><span class="mpb-covrow-v">'+(req>0?cov.toFixed(cov%1?1:0)+'%':'—')+'</span>'
+          +'<div class="mpb-cov-bar"><div class="mpb-cov-fill'+(short?' warn':'')+'" style="width:'+Math.max(0,Math.min(100,cov))+'%"></div></div></div></div>'
+        +(short
+          ? '<div class="mpb-status warn"><span>&#9888;</span><div><div class="mpb-status-t">'+Math.abs(gap)+' staff gap</div>'
+            +'<div class="mpb-status-s">Monitor for today&rsquo;s production</div></div></div>'
+          : '<div class="mpb-status ok"><span>&#9989;</span><div><div class="mpb-status-t">On track</div>'
+            +'<div class="mpb-status-s">'+(r.sup?((r.sup)+' from suppliers'):'Roster covered')+'</div></div></div>')
+      +'</div></div>';
+  });
+  if(sumEl) sumEl.innerHTML=sum;
+  grid.innerHTML=html;
+}
+
+// A short description under each department name. Matched loosely so a renamed
+// or differently-spelled sheet heading still gets one.
+function _deptRole(name){
+  var n=String(name||'').toLowerCase();
+  if(n.indexOf('kitchen')>-1)  return 'Food Production';
+  if(n.indexOf('steward')>-1)  return 'Cleaning &amp; Dishwashing';
+  if(n.indexOf('dispatch')>-1) return 'Delivery &amp; Logistics';
+  if(n.indexOf('office')>-1)   return 'Administration &amp; Support';
+  return 'Department';
 }
 
 function _deptColorOps(n){
