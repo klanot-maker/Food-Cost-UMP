@@ -510,6 +510,8 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 .um-pw-state{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.03em;border-radius:10px;padding:2px 8px;white-space:nowrap;}
 .um-pw-state.secure{background:var(--brl);color:var(--brd);border:1px solid var(--border);}
 .um-pw-state.plain{background:#FDECEC;color:#B3261E;border:1px solid #F3C9C6;}
+.sb-build{margin-top:7px;font-size:9.5px;font-weight:700;letter-spacing:.06em;color:rgba(255,255,255,.62);font-family:'Lato',sans-serif;}
+.sb-build.warn{color:#FFE08A;}
 .dd-pending{display:inline-block;margin-left:6px;background:var(--brl);color:var(--brd);border:1px solid var(--border);border-radius:10px;padding:1px 7px;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;vertical-align:middle;}
 .ddp-wrap{position:relative;display:inline-block;}
 .ddp-btn{display:flex;align-items:center;gap:7px;background:#fff;border:1.5px solid var(--border);border-radius:22px;padding:6px 14px;font-size:12.5px;font-weight:700;color:var(--txt);cursor:pointer;font-family:'Lato',sans-serif;transition:border-color .15s;}
@@ -886,6 +888,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
     </div>
     <div class="sb-wordmark">CALO</div>
     <div class="sb-ttl">UMP Operations<br>Dashboard</div>
+    <div class="sb-build" id="sbBuild" title="Which build this page came from"></div>
   </div>
   <nav class="sb-nav">
     <button class="ni" data-page="operation" onclick="showPage('operation')">
@@ -1980,7 +1983,25 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-09-28.a';
+var UMP_BUILD_UI='2026-09-28.b';
+// Printed in the sidebar so the build actually being served is never in doubt.
+// Saving in the editor does not change what the web app serves, and chasing a
+// change that was never deployed has cost more time than anything else here.
+function _sbBuildLabel(){
+  var el=document.getElementById('sbBuild');
+  if(!el) return;
+  var srv=(typeof UMP_BUILD_SERVER!=='undefined'&&UMP_BUILD_SERVER)?UMP_BUILD_SERVER:null;
+  if(srv&&srv!==UMP_BUILD_UI){
+    el.textContent='BUILD '+UMP_BUILD_UI+' \u2260 '+srv;
+    el.className='sb-build warn';
+    el.title='This page is build '+UMP_BUILD_UI+' but the server is running '+srv
+            +'. One of the two files was not deployed.';
+  } else {
+    el.textContent='BUILD '+UMP_BUILD_UI;
+    el.className='sb-build';
+    el.title='The build this page was served from';
+  }
+}
 var UMP_BUILD_SERVER=null;
 var _lgcEditMode=false;
 var _lgcEditingId=null;
@@ -2340,6 +2361,7 @@ function editInvoice(id){
 function _lgcCheckBuild(){
   var el=document.getElementById('lgcBuild');
   if(!el) return;
+  _sbBuildLabel();
   if(UMP_BUILD_SERVER&&UMP_BUILD_SERVER!==UMP_BUILD_UI){
     el.textContent='This page is build '+UMP_BUILD_UI+' but the server is running build '
       +UMP_BUILD_SERVER+'. Paste the matching Dashboard.gs and deploy a new version — '
@@ -5923,6 +5945,7 @@ function _applyData(result){
 }
 
 function init(){
+  _sbBuildLabel();
   renderCal();
   showPage('operation');
 
