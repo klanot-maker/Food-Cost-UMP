@@ -512,6 +512,113 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 .um-pw-state.plain{background:#FDECEC;color:#B3261E;border:1px solid #F3C9C6;}
 .sb-build{margin-top:7px;font-size:9.5px;font-weight:700;letter-spacing:.06em;color:rgba(255,255,255,.62);font-family:'Lato',sans-serif;}
 .sb-build.warn{color:#FFE08A;}
+/* ══ OPERATION OVERVIEW BOARD ══════════════════════════════ */
+#page-operation{--opb-line:#E3E9EC;--opb-ink:#1A2B26;--opb-mut:#6B7C77;--opb-card:#FFFFFF;}
+.opb-hero{
+  background:linear-gradient(105deg,#0C3A2E 0%,#124B3B 55%,#166048 100%);
+  border-radius:14px;padding:18px 24px;margin-bottom:16px;
+  display:flex;align-items:center;gap:20px;flex-wrap:wrap;color:#fff;
+}
+.opb-brand{flex:0 0 auto;}
+.opb-wordmark{font-size:22px;font-weight:900;letter-spacing:.22em;line-height:1;color:#fff;}
+.opb-brandsub{font-size:8.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.6);margin-top:4px;}
+.opb-hero-rule{width:1px;align-self:stretch;background:rgba(255,255,255,.22);}
+.opb-titles{flex:1 1 220px;min-width:0;}
+.opb-title{font-size:23px;font-weight:800;letter-spacing:-.01em;line-height:1.15;}
+.opb-subtitle{font-size:12px;color:rgba(255,255,255,.66);margin-top:2px;font-weight:600;}
+.opb-hero-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.opb-datechip{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);
+  border-radius:10px;padding:7px 13px;font-size:12.5px;font-weight:700;line-height:1.2;}
+.opb-datechip-ico{font-size:14px;opacity:.9;}
+.opb-datechip-w{display:block;font-size:9.5px;font-weight:600;color:rgba(255,255,255,.62);}
+.opb-toggle{display:flex;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:10px;padding:3px;gap:3px;}
+.opb-tg{background:none;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:700;
+  color:rgba(255,255,255,.78);cursor:pointer;font-family:'Lato',sans-serif;transition:background .15s,color .15s;}
+.opb-tg.act{background:#fff;color:#0C3A2E;}
+.opb-tg:not(.act):hover{color:#fff;}
+
+.opb-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px;}
+.opb-kpi{background:var(--opb-card);border:1px solid var(--opb-line);border-radius:12px;padding:15px 16px;min-width:0;}
+.opb-kpi-hd{display:flex;align-items:center;gap:9px;margin-bottom:10px;}
+.opb-ico{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;flex:0 0 auto;}
+.opb-ico.g{background:#E4F5EE;} .opb-ico.b{background:#E6EFFA;} .opb-ico.t{background:#EDEAFB;} .opb-ico.r{background:#E9F6F0;}
+.opb-kpi-lbl{font-size:11.5px;font-weight:700;color:var(--opb-mut);line-height:1.2;}
+.opb-kpi-num{font-size:31px;font-weight:800;color:var(--opb-ink);line-height:1.05;letter-spacing:-.02em;font-variant-numeric:tabular-nums;}
+.opb-kpi-sub{font-size:10.5px;color:var(--opb-mut);margin-top:5px;font-weight:600;}
+.opb-kpi-delta{display:inline-block;margin-top:7px;font-size:10.5px;font-weight:800;border-radius:11px;padding:2px 9px;}
+.opb-kpi-delta.up{background:#E4F5EE;color:#00764F;} .opb-kpi-delta.dn{background:#FDECEC;color:#B3261E;}
+.opb-kpi-delta.ok{background:#E4F5EE;color:#00764F;} .opb-kpi-delta.bad{background:#FDECEC;color:#B3261E;}
+.opb-bar{height:6px;border-radius:4px;background:#EDF1F3;margin-top:9px;overflow:hidden;}
+.opb-bar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,#00C07F,#00966B);transition:width .4s;}
+
+.opb-row3{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:12px;margin-bottom:16px;align-items:start;}
+.opb-row3b{grid-template-columns:1fr 1.15fr 1fr;}
+.opb-panel{background:var(--opb-card);border:1px solid var(--opb-line);border-radius:12px;padding:16px 18px;min-width:0;}
+.opb-panel-hd{display:flex;align-items:center;gap:8px;font-size:14.5px;font-weight:800;color:var(--opb-ink);margin-bottom:3px;}
+.opb-panel-hd.opb-warn{color:#B3591E;}
+.opb-panel-ico{font-size:15px;}
+.opb-badge{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--opb-mut);background:#F1F5F6;border-radius:9px;padding:2px 9px;}
+.opb-panel-note{font-size:10.5px;color:var(--opb-mut);margin-bottom:12px;font-weight:600;}
+.opb-chart{height:190px;margin-top:12px;position:relative;}
+
+.opb-ready{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.opb-rcard{background:#FAFCFB;border:1px solid var(--opb-line);border-radius:11px;padding:13px 12px;text-align:center;
+  cursor:pointer;font-family:'Lato',sans-serif;transition:border-color .15s,box-shadow .15s,transform .1s;min-width:0;}
+.opb-rcard:hover{border-color:#00C07F;box-shadow:0 2px 10px rgba(0,192,127,.14);}
+.opb-rcard.act{border-color:#00966B;box-shadow:0 0 0 2px rgba(0,192,127,.22);background:#F3FBF7;}
+.opb-rc-lbl{font-size:9.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--opb-mut);margin-bottom:9px;}
+.opb-rc-big{font-size:27px;font-weight:800;color:var(--opb-ink);line-height:1;font-variant-numeric:tabular-nums;}
+.opb-rc-cap{font-size:10px;color:var(--opb-mut);font-weight:600;margin-top:3px;}
+.opb-rc-main{font-size:12px;font-weight:800;color:var(--opb-ink);margin-top:9px;}
+.opb-rc-sub{font-size:10.5px;color:var(--opb-mut);font-weight:600;margin-top:2px;line-height:1.5;}
+.opb-chip{display:inline-block;margin-top:9px;font-size:10px;font-weight:800;border-radius:11px;padding:3px 10px;
+  background:#E4F5EE;color:#00764F;}
+.opb-chip.warn{background:#FDF2E4;color:#A3610F;} .opb-chip.bad{background:#FDECEC;color:#B3261E;}
+.opb-donut{position:relative;width:78px;height:78px;margin:0 auto;}
+.opb-donut-svg{width:78px;height:78px;transform:none;}
+.opb-donut-bg{fill:none;stroke:#EDF1F3;stroke-width:8;}
+.opb-donut-fg{fill:none;stroke:#00A56C;stroke-width:8;stroke-linecap:round;transition:stroke-dasharray .5s;}
+.opb-donut-txt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:15px;font-weight:800;color:var(--opb-ink);font-variant-numeric:tabular-nums;}
+
+.opb-detail{background:var(--opb-card);border:1px solid var(--opb-line);border-radius:12px;padding:16px 18px;margin-bottom:16px;}
+.opb-detail-hd{display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:800;
+  color:var(--opb-ink);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--opb-line);}
+.opb-detail-x{background:none;border:none;font-size:22px;line-height:1;color:var(--opb-mut);cursor:pointer;padding:0 4px;}
+.opb-detail-x:hover{color:#B3261E;}
+.opb-dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+.opb-dtile{background:#FAFCFB;border:1px solid var(--opb-line);border-radius:10px;padding:12px 14px;}
+.opb-dtile-l{font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--opb-mut);}
+.opb-dtile-v{font-size:22px;font-weight:800;color:var(--opb-ink);margin-top:5px;font-variant-numeric:tabular-nums;}
+.opb-dtile-s{font-size:10px;color:var(--opb-mut);font-weight:600;margin-top:2px;}
+
+.opb-item{display:flex;gap:9px;align-items:flex-start;font-size:12px;line-height:1.5;padding:7px 0;color:var(--opb-ink);}
+.opb-item + .opb-item{border-top:1px solid #F1F5F6;}
+.opb-item-ico{flex:0 0 auto;font-size:12px;margin-top:1px;}
+.opb-item b{font-weight:800;}
+.opb-note-ok{background:#EFFAF5;border:1px solid #CCEDDF;border-radius:9px;padding:10px 13px;font-size:12px;
+  font-weight:700;color:#00764F;display:flex;gap:8px;align-items:center;}
+.opb-note-warn{background:#FEF7EC;border:1px solid #F3DCBB;border-radius:9px;padding:10px 13px;margin-top:10px;}
+.opb-note-warn-hd{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#A3610F;margin-bottom:6px;}
+.opb-empty{font-size:12px;color:var(--opb-mut);padding:10px 0;}
+
+/* The complaints card keeps its own title and a 180px donut, both sized for the
+   full-width card it used to live in. Inside a board panel the panel heading
+   already names it, and the donut has a third of the room. */
+#opbBottomRow .ops-dod-card-title{display:none;}
+#opbBottomRow .ops-dod-inner{gap:12px;}
+#opbBottomRow .ops-dod-chart-wrap{width:118px;height:118px;}
+#opbBottomRow .ops-dod-legend{gap:5px 10px;font-size:11px;}
+#opbBottomRow .ops-dod-center-num{font-size:26px;}
+@media (max-width:1180px){
+  .opb-kpis{grid-template-columns:repeat(3,1fr);}
+  .opb-row3,.opb-row3b{grid-template-columns:1fr;}
+}
+@media (max-width:640px){
+  .opb-kpis{grid-template-columns:repeat(2,1fr);}
+  .opb-ready{grid-template-columns:1fr;}
+  .opb-hero{gap:12px;} .opb-hero-rule{display:none;}
+}
 .ops-manpower-note{font-size:11px;font-weight:600;margin-top:4px;}
 .dd-pending{display:inline-block;margin-left:6px;background:var(--brl);color:var(--brd);border:1px solid var(--border);border-radius:10px;padding:1px 7px;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;vertical-align:middle;}
 .ddp-wrap{position:relative;display:inline-block;}
@@ -1308,37 +1415,127 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
     <div class="page" id="page-operation">
 
       <!-- ── HERO BANNER ── -->
-      <div class="ops-hero" id="opsHero">
-        <div class="ops-hero-stat">
-          <div class="ops-hero-eyebrow">🚚 Today's Delivery (Scheduled)</div>
-          <div class="ops-hero-num" id="opsTodayNum">—</div>
-          <div class="ops-hero-sub" id="opsTodayDate">Loading…</div>
-          <div class="ops-hero-pill" id="opsTodayPill" style="display:none"></div>
+      <div class="opb-hero">
+        <div class="opb-brand">
+          <div class="opb-wordmark">CALO</div>
+          <div class="opb-brandsub">UAE Operations</div>
         </div>
-        <div class="ops-hero-stat">
-          <div class="ops-hero-eyebrow">📅 Tomorrow's Delivery</div>
-          <div class="ops-hero-num muted" id="opsTomorrowNum">—</div>
-          <div class="ops-hero-sub" id="opsTomorrowDate">Loading…</div>
+        <div class="opb-hero-rule"></div>
+        <div class="opb-titles">
+          <div class="opb-title">Operation Overview</div>
+          <div class="opb-subtitle">UAE Central Kitchen</div>
         </div>
-        <div class="ops-hero-stat">
-          <div class="ops-hero-eyebrow">📊 Current Week Capacity Target</div>
-          <div class="ops-hero-num" id="opsWeekTarget">—</div>
-          <div class="ops-hero-sub" id="opsWeekLabel">Loading…</div>
+        <div class="opb-hero-right">
+          <div class="opb-datechip">
+            <span class="opb-datechip-ico">&#128197;</span>
+            <span><span class="opb-datechip-d" id="opbDate">&mdash;</span><span class="opb-datechip-w" id="opbDay"></span></span>
+          </div>
+          <div class="opb-toggle">
+            <button class="opb-tg act" id="opbTgBoard" onclick="_opbView('board')">Board View</button>
+            <button class="opb-tg" id="opbTgOps" onclick="_opbView('ops')">Operations View</button>
+          </div>
         </div>
       </div>
 
-      <!-- ── TWO-COLUMN MIDDLE: Manpower + DOD ── -->
-      <div class="ops-mid-row" style="margin-bottom:16px;">
+      <!-- ── KPI ROW ── -->
+      <div class="opb-kpis">
+        <div class="opb-kpi">
+          <div class="opb-kpi-hd"><span class="opb-ico g">&#128666;</span><span class="opb-kpi-lbl">Today&rsquo;s DPD</span></div>
+          <div class="opb-kpi-num" id="opsTodayNum">&mdash;</div>
+          <div class="opb-kpi-sub" id="opsTodayDate">Loading&hellip;</div>
+          <div class="opb-kpi-delta" id="opsTodayPill" style="display:none"></div>
+        </div>
+        <div class="opb-kpi">
+          <div class="opb-kpi-hd"><span class="opb-ico b">&#128197;</span><span class="opb-kpi-lbl">Tomorrow&rsquo;s DPD</span></div>
+          <div class="opb-kpi-num" id="opsTomorrowNum">&mdash;</div>
+          <div class="opb-kpi-sub" id="opsTomorrowDate">Loading&hellip;</div>
+          <div class="opb-kpi-delta" id="opbTomDelta" style="display:none"></div>
+        </div>
+        <div class="opb-kpi">
+          <div class="opb-kpi-hd"><span class="opb-ico t">&#127919;</span><span class="opb-kpi-lbl">Weekly Capacity Target</span></div>
+          <div class="opb-kpi-num" id="opsWeekTarget">&mdash;</div>
+          <div class="opb-kpi-sub" id="opsWeekLabel">Loading&hellip;</div>
+        </div>
+        <div class="opb-kpi">
+          <div class="opb-kpi-hd"><span class="opb-ico g">&#9201;</span><span class="opb-kpi-lbl">Capacity Utilisation</span></div>
+          <div class="opb-kpi-num" id="opbUtilNum">&mdash;</div>
+          <div class="opb-kpi-sub" id="opbUtilSub">&mdash;</div>
+          <div class="opb-bar"><div class="opb-bar-fill" id="opbUtilBar" style="width:0%"></div></div>
+        </div>
+        <div class="opb-kpi">
+          <div class="opb-kpi-hd"><span class="opb-ico r">&#128737;</span><span class="opb-kpi-lbl">Daily Complaints</span></div>
+          <div class="opb-kpi-num" id="opbCompNum">&mdash;</div>
+          <div class="opb-kpi-sub" id="opbCompSub">Target &le; 5/day</div>
+          <div class="opb-kpi-delta" id="opbCompChip" style="display:none"></div>
+        </div>
+      </div>
 
-        <!-- LEFT: Manpower -->
-        <div class="ops-mid-col">
-          <div class="slbl slbl-manpower">Today's Manpower</div>
+      <!-- ── READINESS + CHARTS ── -->
+      <div class="opb-row3" id="opbBoardRow">
+        <div class="opb-panel">
+          <div class="opb-panel-hd"><span class="opb-panel-ico">&#128202;</span>Today&rsquo;s Readiness</div>
+          <div class="opb-panel-note">Choose a tile to open its detail</div>
+          <div class="opb-ready">
+            <button class="opb-rcard" id="opbRcCapacity" onclick="_opbDetail('capacity')">
+              <div class="opb-rc-lbl">&#127760; Capacity</div>
+              <div class="opb-donut" id="opbDonut"><svg viewBox="0 0 80 80" class="opb-donut-svg">
+                <circle cx="40" cy="40" r="32" class="opb-donut-bg"/>
+                <circle cx="40" cy="40" r="32" class="opb-donut-fg" id="opbDonutArc"
+                        stroke-dasharray="0 201" transform="rotate(-90 40 40)"/>
+              </svg><div class="opb-donut-txt" id="opbDonutTxt">&mdash;</div></div>
+              <div class="opb-rc-main" id="opbCapMain">&mdash;</div>
+              <div class="opb-rc-sub" id="opbCapSub">&mdash;</div>
+              <div class="opb-chip" id="opbCapChip">&mdash;</div>
+            </button>
+            <button class="opb-rcard" id="opbRcManpower" onclick="_opbDetail('manpower')">
+              <div class="opb-rc-lbl">&#128101; Manpower</div>
+              <div class="opb-rc-big" id="opbMpBig">&mdash;</div>
+              <div class="opb-rc-cap">On duty</div>
+              <div class="opb-rc-main" id="opbMpMain">&mdash;</div>
+              <div class="opb-rc-sub" id="opbMpSub">&mdash;</div>
+              <div class="opb-chip" id="opbMpChip">&mdash;</div>
+            </button>
+            <button class="opb-rcard" id="opbRcLogistics" onclick="_opbDetail('logistics')">
+              <div class="opb-rc-lbl">&#128666; Logistics</div>
+              <div class="opb-rc-big" id="opbLgBig">&mdash;</div>
+              <div class="opb-rc-cap">Chiller vans</div>
+              <div class="opb-rc-main" id="opbLgMain">&mdash;</div>
+              <div class="opb-rc-sub" id="opbLgSub">&mdash;</div>
+              <div class="opb-chip" id="opbLgChip">&mdash;</div>
+            </button>
+          </div>
+        </div>
+
+        <div class="opb-panel">
+          <div class="opb-panel-hd"><span class="opb-panel-ico">&#128200;</span>7-Day Delivery Volume
+            <span class="opb-badge" id="opbVolAvg">&mdash;</span></div>
+          <div class="opb-chart"><canvas id="opbVolChart"></canvas></div>
+        </div>
+
+        <div class="opb-panel">
+          <div class="opb-panel-hd"><span class="opb-panel-ico">&#9201;</span>Capacity Utilisation Trend</div>
+          <div class="opb-chart"><canvas id="opbUtilChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- ── DETAIL DRAWER ── -->
+      <div class="opb-detail" id="opbDetailWrap" style="display:none;">
+        <div class="opb-detail-hd">
+          <span id="opbDetailTitle">Detail</span>
+          <button class="opb-detail-x" onclick="_opbDetail(null)" title="Close">&times;</button>
+        </div>
+
+        <div id="opbDetailCapacity" style="display:none;">
+          <div class="opb-dgrid" id="opbCapDetail"></div>
+        </div>
+
+        <div id="opbDetailManpower" style="display:none;">
           <div class="ops-manpower-card" id="opsManpowerCard">
             <div class="ops-manpower-hdr">
               <div>
-                <div style="font-size:9.5px;font-weight:700;color:var(--lt);text-transform:uppercase;letter-spacing:.09em;margin-bottom:4px;">👥 Total On Duty</div>
-                <div class="ops-manpower-total" id="opsManpowerTotal">—</div>
-                <div class="ops-manpower-period" id="opsManpowerDate">—</div>
+                <div style="font-size:9.5px;font-weight:700;color:var(--lt);text-transform:uppercase;letter-spacing:.09em;margin-bottom:4px;">&#128101; Total On Duty</div>
+                <div class="ops-manpower-total" id="opsManpowerTotal">&mdash;</div>
+                <div class="ops-manpower-period" id="opsManpowerDate">&mdash;</div>
                 <div class="ops-manpower-note" id="opsManpowerNote" style="display:none;"></div>
               </div>
               <div style="text-align:right;">
@@ -1347,29 +1544,36 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
               </div>
             </div>
             <div class="ops-dept-grid" id="opsDeptGrid" style="grid-template-columns:repeat(2,1fr);">
-              <div style="grid-column:1/-1;color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">Loading manpower data…</div>
+              <div style="grid-column:1/-1;color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">Loading manpower data&hellip;</div>
             </div>
           </div>
         </div>
 
-        <!-- RIGHT: Daily Complaints (DOD) + Logistics stacked -->
-        <div class="ops-mid-col">
-          <div class="slbl slbl-dod" style="margin-bottom:8px;">🚨 Daily Complaints (DOD)</div>
-          <div class="ops-dod-card" style="margin-bottom:16px;">
+        <div id="opbDetailLogistics" style="display:none;">
+          <div class="ops-complaints-row" id="opsLogisticsKpiRow" style="grid-template-columns:repeat(4,1fr)!important;">
+            <div style="grid-column:1/-1;color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">Loading logistics data&hellip;</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── BOTTOM ROW ── -->
+      <div class="opb-row3 opb-row3b" id="opbBottomRow">
+        <div class="opb-panel">
+          <div class="opb-panel-hd"><span class="opb-panel-ico">&#128737;</span>Daily Complaints</div>
+          <div class="ops-dod-card" style="box-shadow:none;border:0;padding:0;background:none;">
             <div id="opsDodKpiRow">
-              <div style="color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">Loading complaints data…</div>
-            </div>
-          </div>
-
-          <!-- LOGISTICS below DOD -->
-          <div class="ops-section-logistics">
-            <div class="slbl slbl-logistics" style="margin-bottom:14px;">🚚 Logistics</div>
-            <div class="ops-complaints-row" id="opsLogisticsKpiRow" style="grid-template-columns:repeat(4,1fr)!important;">
-              <div style="grid-column:1/-1;color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">Loading logistics data…</div>
+              <div style="color:var(--lt);font-size:12px;padding:12px 0;text-align:center;">Loading complaints data&hellip;</div>
             </div>
           </div>
         </div>
-
+        <div class="opb-panel">
+          <div class="opb-panel-hd opb-warn"><span class="opb-panel-ico">&#9888;</span>Attention Required</div>
+          <div id="opbAttention"><div class="opb-empty">Loading&hellip;</div></div>
+        </div>
+        <div class="opb-panel">
+          <div class="opb-panel-hd"><span class="opb-panel-ico">&#10024;</span>Key Highlights</div>
+          <div id="opbHighlights"><div class="opb-empty">Loading&hellip;</div></div>
+        </div>
       </div>
 
     </div>
@@ -1985,7 +2189,7 @@ var LGC_INVOICES=[];
 // Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-09-28.c';
+var UMP_BUILD_UI='2026-09-28.d';
 // Manpower is built from the staff phase, which lands separately from the
 // Operation Overview phase. Without knowing which state that phase is in, an
 // empty card looked identical whether the data was still coming, had failed to
@@ -2622,6 +2826,7 @@ function _renderOpsForDate(ds, endDs){
     :'Range avg';
   _mpPendingNote=_staffNote;
   _renderManpowerDepts(depts, rangeLabel);
+  _opbRenderBoard(ops, ds, endDs, dedupedForBoard(depts));
 
   // DOD: sum across range
   _renderDodKpisForDate(ds, endDs, _opsCS.userApplied);
@@ -2635,6 +2840,251 @@ function _fmtHeroDate(ds){
   var d=new Date(parseInt(p[0]),parseInt(p[1])-1,parseInt(p[2]));
   var days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   return d.getDate()+' '+MO_SHT[d.getMonth()]+' '+d.getFullYear()+' ('+days[d.getDay()]+')';
+}
+
+// ══ OPERATION OVERVIEW BOARD ══════════════════════════════
+// Reads the same figures the detail panels below it do, so a tile and the
+// panel it opens can never disagree.
+var _opbSel=null, _opbVolChart=null, _opbUtilChart=null;
+
+function dedupedForBoard(depts){
+  var seen={};
+  (depts||[]).forEach(function(d){
+    var k=String(d.name||'').trim().replace(/\s+/g,' ').toLowerCase();
+    if(!k) return;
+    if(!seen[k]||(d.hasToday&&!seen[k].hasToday)) seen[k]=d;
+  });
+  return Object.keys(seen).map(function(k){return seen[k];});
+}
+
+function _opbView(v){
+  var board=document.getElementById('opbBoardRow'), bot=document.getElementById('opbBottomRow');
+  var tb=document.getElementById('opbTgBoard'), to=document.getElementById('opbTgOps');
+  if(!board) return;
+  if(v==='ops'){
+    board.style.display='none'; if(bot) bot.style.display='none';
+    if(tb) tb.classList.remove('act'); if(to) to.classList.add('act');
+    _opbDetail('all');
+  } else {
+    board.style.display=''; if(bot) bot.style.display='';
+    if(tb) tb.classList.add('act'); if(to) to.classList.remove('act');
+    _opbDetail(null);
+  }
+}
+
+// Opens one tile's detail, or every one of them for Operations View.
+function _opbDetail(which){
+  var wrap=document.getElementById('opbDetailWrap');
+  if(!wrap) return;
+  var map={capacity:'opbDetailCapacity',manpower:'opbDetailManpower',logistics:'opbDetailLogistics'};
+  var cards={capacity:'opbRcCapacity',manpower:'opbRcManpower',logistics:'opbRcLogistics'};
+  if(_opbSel===which&&which!=='all'){ which=null; }           // a second click closes it
+  _opbSel=which;
+  Object.keys(cards).forEach(function(k){
+    var c=document.getElementById(cards[k]); if(c) c.classList.toggle('act',which===k);
+  });
+  var any=false;
+  Object.keys(map).forEach(function(k){
+    var el=document.getElementById(map[k]); if(!el) return;
+    var on=(which==='all'||which===k);
+    el.style.display=on?'':'none';
+    if(on) any=true;
+  });
+  wrap.style.display=any?'':'none';
+  var t=document.getElementById('opbDetailTitle');
+  if(t) t.textContent=which==='all'?'Operations detail'
+    :which==='capacity'?'Capacity detail'
+    :which==='manpower'?'Manpower by department'
+    :which==='logistics'?'Fleet on the road':'Detail';
+  if(any&&which!=='all'&&wrap.scrollIntoView) wrap.scrollIntoView({block:'nearest',behavior:'smooth'});
+}
+
+function _opbRenderBoard(ops, ds, endDs, depts){
+  if(!document.getElementById('opbDate')) return;
+  ops=ops||{};
+  var num=function(n){return (n||0).toLocaleString();};
+  var set=function(id,v){var e=document.getElementById(id); if(e) e.textContent=v;};
+
+  // ── header date ───────────────────────────────────────────
+  var DYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  var dp=String(ds||'').split('-');
+  if(dp.length===3){
+    var dObj=new Date(parseInt(dp[0]),parseInt(dp[1])-1,parseInt(dp[2]));
+    set('opbDate',dObj.getDate()+' '+MO_SHT[dObj.getMonth()]+' '+dObj.getFullYear());
+    set('opbDay',ds===endDs?DYS[dObj.getDay()]:'range');
+  }
+
+  // ── capacity ──────────────────────────────────────────────
+  var today=0, tomorrow=0;
+  var recs=(DATA.deliveries&&DATA.deliveries.records)||[];
+  var byDate={}; recs.forEach(function(r){byDate[r.dateStr]=r.actual;});
+  var d1=new Date(ds+'T00:00:00'); d1.setDate(d1.getDate()+1);
+  var d2=new Date(ds+'T00:00:00'); d2.setDate(d2.getDate()+2);
+  var f=function(d){return d.getFullYear()+'-'+_p2(d.getMonth()+1)+'-'+_p2(d.getDate());};
+  today=byDate[f(d1)]||0; tomorrow=byDate[f(d2)]||0;
+  var target=ops.currentWeekTarget||0;
+  var util=target>0?(today/target*100):0;
+  set('opbUtilNum',target>0?util.toFixed(1)+'%':'—');
+  set('opbUtilSub',target>0?('Headroom: '+num(Math.max(0,target-today))+' DPD'):'No target set');
+  var bar=document.getElementById('opbUtilBar');
+  if(bar) bar.style.width=Math.max(0,Math.min(100,util))+'%';
+  var arc=document.getElementById('opbDonutArc');
+  if(arc){var C=2*Math.PI*32; var on=C*Math.max(0,Math.min(1,util/100));
+          arc.setAttribute('stroke-dasharray',on.toFixed(1)+' '+C.toFixed(1));}
+  set('opbDonutTxt',target>0?util.toFixed(1)+'%':'—');
+  set('opbCapMain',num(today)+' / '+num(target)+' DPD');
+  set('opbCapSub',target>0?('Headroom: '+num(Math.max(0,target-today))+' DPD'):'—');
+  var capChip=document.getElementById('opbCapChip');
+  if(capChip){
+    var over=target>0&&today>target;
+    capChip.textContent=target<=0?'No target':over?'Over capacity':util>=90?'Near capacity':'Within capacity';
+    capChip.className='opb-chip'+(over?' bad':util>=90?' warn':'');
+  }
+
+  // tomorrow's delta
+  var tomDelta=document.getElementById('opbTomDelta');
+  if(tomDelta){
+    if(today>0&&tomorrow>0){
+      var diff=tomorrow-today;
+      tomDelta.textContent=(diff>=0?'▲ +':'▼ ')+num(Math.abs(diff))+' vs today';
+      tomDelta.className='opb-kpi-delta '+(diff>=0?'up':'dn');
+      tomDelta.style.display='inline-block';
+    } else tomDelta.style.display='none';
+  }
+
+  // ── manpower ──────────────────────────────────────────────
+  var onDuty=0, perm=0, sup=0, al=0, sick=0;
+  (depts||[]).forEach(function(d){
+    onDuty+=d.row.on||0; perm+=d.row.ps||0; sup+=d.row.sup||0;
+    al+=d.row.al||0; sick+=d.row.sl||0;
+  });
+  var covered=onDuty+sup;
+  var cov=perm>0?(covered/perm*100):0;
+  set('opbMpBig',onDuty?num(onDuty):'—');
+  set('opbMpMain',perm>0?('Required: '+num(perm)):'Required: —');
+  set('opbMpSub',perm>0?('Coverage: '+cov.toFixed(1)+'%  ·  +'+num(sup)+' supplier'):'—');
+  var mpChip=document.getElementById('opbMpChip');
+  if(mpChip){
+    var gap=perm-covered;
+    mpChip.textContent=perm<=0?'No data':gap>0?(num(gap)+' short'):'Fully covered';
+    mpChip.className='opb-chip'+(perm<=0?' warn':gap>0?' warn':'');
+  }
+
+  // ── logistics ─────────────────────────────────────────────
+  var lrows=(ops.logisticsRows)||[];
+  var inR=lrows.filter(function(r){return r.ds&&r.ds>=ds&&r.ds<=endDs;});
+  var avg=function(k){ return inR.length?Math.round(inR.reduce(function(s,r){return s+(r[k]||0);},0)/inR.length):0; };
+  var vans=avg('chillerVan'), trucks=avg('truck3ton')+avg('supplyChainTruck');
+  var deliv=avg('delivery'), lgStaff=avg('totalStaff');
+  var perVan=vans>0&&deliv>0?Math.round(deliv/vans):0;
+  set('opbLgBig',vans?num(vans):'—');
+  set('opbLgMain',num(trucks)+' trucks  ·  '+num(lgStaff)+' staff');
+  set('opbLgSub',perVan?(num(perVan)+' deliveries per van'):'—');
+  var lgChip=document.getElementById('opbLgChip');
+  if(lgChip){
+    lgChip.textContent=inR.length?'Available':'No data';
+    lgChip.className='opb-chip'+(inR.length?'':' warn');
+  }
+
+  // ── complaints ────────────────────────────────────────────
+  var dodRecs=(ops.dodAllRecords)||[];
+  var cTot=0, cFound=false;
+  dodRecs.forEach(function(r){ if(r.dateStr>=ds&&r.dateStr<=endDs){ cTot+=r.total||0; cFound=true; } });
+  set('opbCompNum',cFound?num(cTot):'—');
+  var compChip=document.getElementById('opbCompChip');
+  if(compChip){
+    if(!cFound){ compChip.style.display='none'; }
+    else { compChip.textContent=cTot<=5?'On track':'Above target';
+           compChip.className='opb-kpi-delta '+(cTot<=5?'ok':'bad');
+           compChip.style.display='inline-block'; }
+  }
+
+  // ── capacity detail tiles ─────────────────────────────────
+  var cd=document.getElementById('opbCapDetail');
+  if(cd){
+    var tile=function(l,v,s2){return '<div class="opb-dtile"><div class="opb-dtile-l">'+l+'</div>'
+      +'<div class="opb-dtile-v">'+v+'</div><div class="opb-dtile-s">'+(s2||'')+'</div></div>';};
+    cd.innerHTML=tile('Scheduled today',num(today),_fmtHeroDate(f(d1)))
+      +tile('Scheduled tomorrow',num(tomorrow),_fmtHeroDate(f(d2)))
+      +tile('Weekly target',num(target),ops.currentWeekLabel||'')
+      +tile('Utilisation',target>0?util.toFixed(1)+'%':'—',target>0?('Headroom '+num(Math.max(0,target-today))):'')
+      +tile('Deliveries per van',perVan?num(perVan):'—',vans?(num(vans)+' chiller vans'):'');
+  }
+
+  // ── the two charts ────────────────────────────────────────
+  _opbCharts(ds, byDate, target);
+
+  // ── attention / highlights, worked out from the figures above ──
+  var att=[], hi=[];
+  if(target>0&&today>target) att.push(['Capacity','Today is <b>'+num(today-target)+' DPD over</b> the weekly target of '+num(target)+'.']);
+  else if(target>0&&util>=90) att.push(['Capacity','Today is at <b>'+util.toFixed(1)+'%</b> of the weekly target — approaching capacity.']);
+  else if(target>0) hi.push('Operations running within capacity ('+util.toFixed(1)+'%)');
+  if(perm>0&&perm-covered>0) att.push(['Manpower','<b>'+num(perm-covered)+' below</b> the '+num(perm)+' required, including suppliers.']);
+  else if(perm>0) hi.push('Manpower fully covered at '+cov.toFixed(1)+'%');
+  if(cFound&&cTot>5) att.push(['Complaints','<b>'+num(cTot)+'</b> logged against a target of 5 per day.']);
+  else if(cFound) hi.push(cTot===0?'No complaints logged':'Complaints within target ('+num(cTot)+')');
+  if(!inR.length) att.push(['Logistics','No fleet figures logged for this date.']);
+  else hi.push('Fleet available — '+num(vans)+' chiller vans, '+num(trucks)+' trucks');
+  if(al+sick>0) hi.push(num(al)+' on annual leave, '+num(sick)+' on sick leave');
+
+  var aEl=document.getElementById('opbAttention');
+  if(aEl){
+    aEl.innerHTML='<div class="opb-note-ok">✅ '+(att.length?('<span>'+att.length+' item'+(att.length===1?'':'s')+' to review</span>'):'<span>No critical operational issues today</span>')+'</div>'
+      +(att.length?('<div class="opb-note-warn"><div class="opb-note-warn-hd">Items to monitor</div>'
+        +att.map(function(a){return '<div class="opb-item"><span class="opb-item-ico">•</span><span><b>'+a[0]+':</b> '+a[1]+'</span></div>';}).join('')
+        +'</div>'):'');
+  }
+  var hEl=document.getElementById('opbHighlights');
+  if(hEl){
+    hEl.innerHTML=hi.length
+      ? hi.map(function(t){return '<div class="opb-item"><span class="opb-item-ico">✅</span><span>'+t+'</span></div>';}).join('')
+      : '<div class="opb-empty">Nothing to highlight for this date.</div>';
+  }
+}
+
+// Seven days up to and including the selected date.
+function _opbCharts(ds, byDate, target){
+  if(typeof Chart==='undefined') return;
+  var labels=[], vols=[], utils=[];
+  var base=new Date(ds+'T00:00:00');
+  var DY=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  for(var i=6;i>=0;i--){
+    var d=new Date(base); d.setDate(d.getDate()-i+1);   // +1: scheduled date convention
+    var k=d.getFullYear()+'-'+_p2(d.getMonth()+1)+'-'+_p2(d.getDate());
+    labels.push(DY[d.getDay()]+' '+d.getDate());
+    var v=byDate[k]||0; vols.push(v);
+    utils.push(target>0?Math.round(v/target*100):0);
+  }
+  var shown=vols.filter(function(v){return v>0;});
+  var avg=shown.length?Math.round(shown.reduce(function(a,b){return a+b;},0)/shown.length):0;
+  var badge=document.getElementById('opbVolAvg');
+  if(badge) badge.textContent=avg?('Avg '+avg.toLocaleString()):'—';
+
+  var grid={color:'#EFF3F4'}, tick={font:{size:9.5},color:'#7A8A85'};
+  if(_opbVolChart){_opbVolChart.destroy();_opbVolChart=null;}
+  var vc=document.getElementById('opbVolChart');
+  if(vc) _opbVolChart=new Chart(vc,{type:'line',
+    data:{labels:labels,datasets:[
+      {label:'Actual DPD',data:vols,borderColor:'#2E7DD1',backgroundColor:'rgba(46,125,209,.10)',
+       borderWidth:2,pointRadius:3,pointBackgroundColor:'#2E7DD1',tension:.32,fill:true},
+      {label:'Target',data:labels.map(function(){return target;}),borderColor:'#00A56C',
+       borderWidth:1.5,borderDash:[5,4],pointRadius:0,fill:false}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:true,position:'bottom',labels:{font:{size:9.5},boxWidth:10,usePointStyle:true,color:'#7A8A85'}}},
+      scales:{x:{grid:{display:false},ticks:tick},y:{grid:grid,ticks:tick,beginAtZero:false}}}});
+
+  if(_opbUtilChart){_opbUtilChart.destroy();_opbUtilChart=null;}
+  var uc=document.getElementById('opbUtilChart');
+  if(uc) _opbUtilChart=new Chart(uc,{type:'bar',
+    data:{labels:labels,datasets:[
+      {label:'Utilisation',data:utils,backgroundColor:'#10795A',borderRadius:4,barPercentage:.72},
+      {label:'Target 100%',type:'line',data:labels.map(function(){return 100;}),borderColor:'#00A56C',
+       borderWidth:1.5,borderDash:[5,4],pointRadius:0,fill:false}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:true,position:'bottom',labels:{font:{size:9.5},boxWidth:10,usePointStyle:true,color:'#7A8A85'}},
+               tooltip:{callbacks:{label:function(c){return c.parsed.y+'%';}}}},
+      scales:{x:{grid:{display:false},ticks:tick},
+              y:{grid:grid,beginAtZero:true,max:110,ticks:{callback:function(v){return v+'%';},font:{size:9.5},color:'#7A8A85'}}}}});
 }
 
 var _mpPendingNote='';
