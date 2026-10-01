@@ -32,7 +32,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-09-28.e';
+var UMP_BUILD    = '2026-10-01.a';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 // A cache entry is capped at ~100 KB, and the page payloads outgrew that: the
@@ -514,7 +514,7 @@ function getFinancialData(ss) {
     }
 
     var wastage = [], other = [], kpis = {};
-    var inWaste = false, inOther = false, wasteDone = false;
+    var inWaste = false, inOther = false, wasteDone = false, otherDone = false;
 
     for (var r = 0; r < all.length; r++) {
       var lbl  = String(all[r][0] || '').trim();
@@ -522,13 +522,18 @@ function getFinancialData(ss) {
       if (!lbl) continue;
 
       if (!wasteDone && lblL === 'wastages')         { inWaste = true;  inOther = false; continue; }
-      if (lblL.indexOf('other food cost') > -1)      { inOther = true;  inWaste = false; continue; }
+      // Guarded the same way as Wastages. The sheet carries a second block of
+      // Other Food Cost rows further down under the same labels, and without
+      // this it reopened the section and read them as more of the first block —
+      // which, once duplicate names were being added together rather than
+      // dropped, inflated every line in it.
+      if (!otherDone && lblL.indexOf('other food cost') > -1) { inOther = true; inWaste = false; continue; }
       // A total closes whichever section is open, not just the one its wording
       // names. The sheet labels the Other Food Cost total "Total Wastage &
       // Spoiled Items" too, and closing only the wastage section left Other
       // open — so anything added below that row would have been swept into it.
-      if (lblL.indexOf('total wastage') > -1)        { inWaste = false; inOther = false; wasteDone = true; continue; }
-      if (lblL.indexOf('total other') > -1)          { inWaste = false; inOther = false; continue; }
+      if (lblL.indexOf('total wastage') > -1)        { if (inOther) otherDone = true; inWaste = false; inOther = false; wasteDone = true; continue; }
+      if (lblL.indexOf('total other') > -1)          { otherDone = true; inWaste = false; inOther = false; continue; }
       if (/^total\b/.test(lblL))                     { inWaste = false; inOther = false; continue; }
       if (lblL === 'category' || lblL === 'subtotal' || lblL === 'total') continue;
 
