@@ -44,6 +44,9 @@ function sendFinancialSlackSummary(ym) {
   if (code >= 300) {
     throw new Error('Slack rejected the message (' + code + '): ' + res.getContentText());
   }
+  // Said out loud, because "Execution completed" on its own looks the same
+  // whether the message went to Slack or was only printed here.
+  Logger.log('POSTED TO SLACK — ' + _slkLabelFor_(ym) + ' (' + msg.length + ' characters). Check the channel.');
   return { ok: true, month: _slkLabelFor_(ym), characters: msg.length };
 }
 
@@ -51,7 +54,7 @@ function sendFinancialSlackSummary(ym) {
 // read over before anyone in the channel sees it.
 function previewFinancialSlackSummary(ym) {
   var msg = buildFinancialSlackSummary(ym);
-  Logger.log(msg);
+  Logger.log('PREVIEW ONLY — nothing has been sent. Run sendFinancialSlackSummary to post it.\n\n' + msg);
   return msg;
 }
 
