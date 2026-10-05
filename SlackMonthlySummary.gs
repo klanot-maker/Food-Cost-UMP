@@ -167,8 +167,12 @@ function _slkPad_(s, w) {
 function _slkLabelFor_(ym) {
   var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var y, m;
-  if (ym) {
-    var p = String(ym).split('-');
+  // A time-driven trigger calls the handler with an event object, not a month.
+  // Taken at face value that became the label "undefined NaN" and the run died
+  // on a confusing error, so only a real YYYY-MM is honoured here.
+  var want = (typeof ym === 'string' && /^\d{4}-\d{1,2}$/.test(ym.trim())) ? ym.trim() : null;
+  if (want) {
+    var p = want.split('-');
     y = parseInt(p[0], 10); m = parseInt(p[1], 10) - 1;
   } else {
     var d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
