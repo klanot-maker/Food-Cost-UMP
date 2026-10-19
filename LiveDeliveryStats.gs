@@ -71,9 +71,14 @@ function _caloHeaders_(style) {
   return h;
 }
 
-function callDashboardApi(path, params, style) {
+function callDashboardApi(path, params, style, rawQuery) {
   var url = CALO_API_BASE + (path.charAt(0) === '/' ? path : '/' + path);
-  if (params) {
+  // Some query shapes only work unencoded — day[gte] percent-encodes to
+  // day%5Bgte%5D, and a server expecting literal brackets never sees the
+  // parameter at all. rawQuery is passed through exactly as written.
+  if (rawQuery) {
+    url += (url.indexOf('?') > -1 ? '&' : '?') + rawQuery;
+  } else if (params) {
     var q = Object.keys(params)
       .filter(function(k){ return params[k] !== undefined && params[k] !== null && params[k] !== ''; })
       .map(function(k){ return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); });
@@ -217,47 +222,57 @@ function testDeliveryStats() {
 function testDateFilterEncodings() {
   var to = _caloShift_(_caloYmd_(new Date()), -1);
   var from = _caloShift_(to, -4);
+  var q = function(raw) { return { raw: raw }; };
   var attempts = [
-    ['no filter at all (baseline)', {}],
-    ['day[gte] / day[lte]',   { 'day[gte]': from, 'day[lte]': to }],
-    ['day.gte / day.lte',     { 'day.gte': from, 'day.lte': to }],
-    ['day as JSON',           { day: JSON.stringify({ gte: from, lte: to }) }],
-    ['from / to',             { from: from, to: to }],
-    ['startDate / endDate',   { startDate: from, endDate: to }],
-    ['gte / lte',             { gte: from, lte: to }],
-    ['dateFrom / dateTo',     { dateFrom: from, dateTo: to }],
-    ['a single day[eq]',      { 'day[eq]': to }],
-    ['a single day',          { day: to }],
-    ['brackets + groupBy=day',{ 'day[gte]': from, 'day[lte]': to, groupBy: 'day' }],
-    ['brackets + country=AE', { 'day[gte]': from, 'day[lte]': to, country: 'AE' }]
+    ['no filter (baseline)',      null, null],
+    ['day[gte] encoded',          { 'day[gte]': from, 'day[lte]': to }, null],
+    ['day[gte] LITERAL brackets', null, 'day[gte]=' + from + '&day[lte]=' + to],
+    ['filter[day][gte] literal',  null, 'filter[day][gte]=' + from + '&filter[day][lte]=' + to],
+    ['where[day][gte] literal',   null, 'where[day][gte]=' + from + '&where[day][lte]=' + to],
+    ['day as JSON',               { day: JSON.stringify({ gte: from, lte: to }) }, null],
+    ['query as JSON',             { query: JSON.stringify({ day: { gte: from, lte: to } }) }, null],
+    ['filters as JSON',           { filters: JSON.stringify({ day: { gte: from, lte: to } }) }, null],
+    ['from / to',                 { from: from, to: to }, null],
+    ['country=AE',                { country: 'AE' }, null],
+    ['kitchen=BH001 (the README\u2019s own example)', { kitchen: 'BH001' }, null]
   ];
-  Logger.log('Window ' + from + ' to ' + to + ' (5 days).');
-  Logger.log('An encoding that works returns far fewer than the baseline.\n');
 
-  var baseline = null, rows = [];
+  Logger.log('Window ' + from + ' to ' + to + '.');
+  Logger.log('The count is a live running total, so it creeps up between calls.');
+  Logger.log('Only a count far BELOW the baseline means a parameter was honoured.\n');
+
+  var first = null, rows = [];
   attempts.forEach(function(a) {
-    var label = a[0], params = a[1], line;
+    var label = a[0], line;
     try {
-      var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, params);
+      var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, a[1], null, a[2]);
       var count = (json && json.count !== undefined) ? json.count : null;
-      var keys  = json && typeof json === 'object' ? Object.keys(json).join(',') : typeof json;
-      if (baseline === null) baseline = count;
-      var verdict = (count === null) ? '?'
-                  : (count === baseline && label.indexOf('baseline') < 0) ? 'IGNORED'
-                  : (count === baseline) ? 'baseline' : '*** FILTERED ***';
-      line = _caloPad_(label, 26) + ' count=' + _caloPad_(String(count), 12) + ' ' + verdict + '   keys: ' + keys;
+      if (first === null) first = count;
+      var verdict;
+      if (count === null) verdict = 'no count in response';
+      else if (count < first * 0.9) verdict = '*** HONOURED — ' + Math.round(100 - count / first * 100) + '% smaller ***';
+      else if (count >= first) verdict = 'ignored (same or drifted up)';
+      else verdict = 'ignored (within noise)';
+      line = _caloPad_(label, 34) + ' count=' + _caloPad_(String(count), 12) + verdict;
     } catch (e) {
-      line = _caloPad_(label, 26) + ' ERROR  ' + e.message.substring(0, 120);
+      line = _caloPad_(label, 34) + ' ERROR  ' + e.message.substring(0, 140);
     }
-    rows.push(line);
-    Logger.log(line);
+    rows.push(line); Logger.log(line);
   });
 
-  Logger.log('\n──── anything marked *** FILTERED *** is the one we want ────');
-  var win = rows.filter(function(r){ return r.indexOf('*** FILTERED ***') > -1; });
+  // Re-read the baseline at the end: the gap against the first one is the drift,
+  // which is what every "ignored" row above is sitting inside.
+  try {
+    var again = callDashboardApi(CALO_DELIVERY_STATS_PATH, null, null, null);
+    Logger.log('\nbaseline re-read at the end: ' + again.count
+      + '   (drift during this run: +' + (again.count - first) + ')');
+  } catch (e) {}
+
+  var win = rows.filter(function(r) { return r.indexOf('HONOURED') > -1; });
+  Logger.log('\n──── result ────');
   Logger.log(win.length ? win.join('\n')
-    : 'None of them narrowed it. The filter is spelled some other way, or this '
-      + 'endpoint only ever returns a total. Send me this whole log.');
+    : 'Every parameter was ignored — the endpoint returns the whole dataset regardless.\n'
+    + 'This needs an answer from the service owners; send them the message I gave you.');
   return rows;
 }
 
