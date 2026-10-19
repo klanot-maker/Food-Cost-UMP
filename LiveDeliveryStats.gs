@@ -38,7 +38,18 @@ var CALO_API_KEY_PROP  = 'CALO_API_KEY';
 var CALO_API_HEADER    = 'x-api-key';   // 'x-api-key' | 'bearer' | 'apikey'
 var CALO_API_CACHE_TTL = 60;            // seconds — live figures, so far shorter than the sheets
 
-var CALO_DELIVERY_STATS_PATH = '';      // ← e.g. '/stats/deliveries'
+// From the SDK's own endpoint list. The /ext/v1 prefix is the part that made
+// every shorter path 404: /ext/v1/stats/nope still 404s, so the route is real.
+//   GET /ext/v1/stats/meal                          meal (portion) stats
+//   GET /ext/v1/stats/component                     component stats
+//   GET /ext/v1/stats/ingredient                    ingredient stats
+//   GET /ext/v1/stats/deliveries                    delivery stats   ← this one
+//   GET /ext/v1/stats/packaging/package-elements    packaging stats
+//   GET /ext/v1/stats/packaging/cutlery-cooler-bags cutlery & cooler bags
+var CALO_DELIVERY_STATS_PATH = '/ext/v1/stats/deliveries';
+// The README's example passes kitchen: 'BH001', which is Bahrain. Set the UAE
+// code here; left empty the parameter is simply not sent.
+var CALO_KITCHEN             = '';
 var CALO_SYNC_DAYS           = 14;      // how far back a run looks
 var CALO_SYNC_OVERWRITE      = false;   // true lets it correct figures already in the sheet
 
@@ -84,9 +95,9 @@ function probeDashboardApi(paths) {
   Logger.log('Key found (' + key.length + ' characters). Probing ' + CALO_API_BASE + '\n');
 
   var candidates = paths || [
-    '/', '/stats', '/delivery', '/deliveries', '/delivery/stats', '/deliveries/stats',
-    '/stats/delivery', '/stats/deliveries', '/delivery-stats', '/dashboard/stats',
-    '/meal-stats', '/stats/meals', '/v1/stats', '/v1/delivery/stats'
+    '/ext/v1/stats/deliveries', '/ext/v1/stats/meal', '/ext/v1/stats/component',
+    '/ext/v1/stats/ingredient', '/ext/v1/stats/packaging/package-elements',
+    '/ext/v1/stats/packaging/cutlery-cooler-bags'
   ];
   var out = [], hits = [];
   candidates.forEach(function(p) {
@@ -152,7 +163,10 @@ function _caloCountsByDate_(from, to) {
   if (!CALO_DELIVERY_STATS_PATH) {
     throw new Error('CALO_DELIVERY_STATS_PATH is not set — run probeDashboardApi() to find the route.');
   }
-  var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, { from: from, to: to });
+  // The SDK takes day as { gte, lte }; over the wire that is day[gte]/day[lte].
+  var params = { 'day[gte]': from, 'day[lte]': to };
+  if (CALO_KITCHEN) params.kitchen = CALO_KITCHEN;
+  var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, params);
   var norm = _caloNormaliseCounts_(json);
   if (!norm.found) {
     throw new Error('The API answered but no date/count pairs were recognised in it. '
@@ -169,6 +183,30 @@ function getLiveDeliveryStats(from, to) {
     try { CacheService.getScriptCache().put(ck, JSON.stringify(payload), CALO_API_CACHE_TTL); } catch (e) {}
     return payload;
   } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// Fetches a few days and prints exactly what came back, so the reader below
+// can be matched to the real shape rather than a guess at it.
+function testDeliveryStats() {
+  var to = _caloShift_(_caloYmd_(new Date()), -1);
+  var from = _caloShift_(to, -4);
+  Logger.log('GET ' + CALO_API_BASE + CALO_DELIVERY_STATS_PATH
+    + '  day[gte]=' + from + '  day[lte]=' + to
+    + (CALO_KITCHEN ? '  kitchen=' + CALO_KITCHEN : '  (no kitchen filter)'));
+  try {
+    var params = { 'day[gte]': from, 'day[lte]': to };
+    if (CALO_KITCHEN) params.kitchen = CALO_KITCHEN;
+    var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, params);
+    Logger.log('\n──── raw response ────\n' + JSON.stringify(json, null, 2).substring(0, 4000));
+    var norm = _caloNormaliseCounts_(json);
+    Logger.log('\n──── dates the reader recognised: ' + norm.found + ' ────');
+    Logger.log(norm.found ? JSON.stringify(norm.counts, null, 2)
+      : 'None. Send me the raw response above and I will match the reader to it.');
+    return json;
+  } catch (e) {
+    Logger.log('\nFAILED: ' + e.message);
+    return { ok: false, error: e.message };
+  }
 }
 
 // ── THE SYNC ────────────────────────────────────────────────
