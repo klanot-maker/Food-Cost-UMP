@@ -1,0 +1,469 @@
+// ============================================================
+// LIVE DELIVERY STATS — @calo/dashboard-sdk API → DELIVERY tab
+// ============================================================
+// The SDK itself cannot run here: Apps Script has no npm. It is a
+// client over an HTTP API though, so this calls that API directly.
+//
+// Base URL: https://0t42vvmg9i.execute-api.us-east-1.amazonaws.com
+//
+// WHAT THIS DOES
+//   Fills the DELIVERY tab from the API, so the manual update goes
+//   away and everything already reading that tab — the Operation
+//   Overview hero, Capacity Overview, forecast vs actual, the Slack
+//   summary's delivery lines — becomes live without being touched.
+//
+// HOW IT BEHAVES, by default
+//   • Only fills days the sheet has no figure for. A number already
+//     there is left alone and reported, never quietly replaced.
+//   • Never writes today or any future day — a day is only written
+//     once it has closed.
+//   • previewDeliverySync() shows exactly what it would change
+//     without changing anything.
+//
+// ── The key does NOT go in this file ────────────────────────
+// Anyone with edit access to the project can read the source, so a
+// key pasted here is a key handed out. Put it in Script Properties:
+//
+//   Project Settings (⚙) → Script Properties → Add script property
+//     Property:  CALO_API_KEY
+//     Value:     <your key>
+//
+// ── Still to fill in ────────────────────────────────────────
+// CALO_DELIVERY_STATS_PATH below. Run probeDashboardApi() and send
+// me the log, or the SDK's README, and I will set it.
+// ============================================================
+
+var CALO_API_BASE      = 'https://0t42vvmg9i.execute-api.us-east-1.amazonaws.com';
+var CALO_API_KEY_PROP  = 'CALO_API_KEY';
+var CALO_API_HEADER    = 'x-api-key';   // 'x-api-key' | 'bearer' | 'apikey'
+var CALO_API_CACHE_TTL = 60;            // seconds — live figures, so far shorter than the sheets
+
+// From the SDK's own endpoint list. The /ext/v1 prefix is the part that made
+// every shorter path 404: /ext/v1/stats/nope still 404s, so the route is real.
+//   GET /ext/v1/stats/meal                          meal (portion) stats
+//   GET /ext/v1/stats/component                     component stats
+//   GET /ext/v1/stats/ingredient                    ingredient stats
+//   GET /ext/v1/stats/deliveries                    delivery stats   ← this one
+//   GET /ext/v1/stats/packaging/package-elements    packaging stats
+//   GET /ext/v1/stats/packaging/cutlery-cooler-bags cutlery & cooler bags
+var CALO_DELIVERY_STATS_PATH = '/ext/v1/stats/deliveries';
+// The README's example passes kitchen: 'BH001', which is Bahrain. Set the UAE
+// code here; left empty the parameter is simply not sent.
+var CALO_KITCHEN             = '';
+var CALO_SYNC_DAYS           = 14;      // how far back a run looks
+var CALO_SYNC_OVERWRITE      = false;   // true lets it correct figures already in the sheet
+
+// ── API CLIENT ──────────────────────────────────────────────
+function _caloApiKey_() {
+  var k = PropertiesService.getScriptProperties().getProperty(CALO_API_KEY_PROP);
+  if (!k) {
+    throw new Error('No API key stored. Project Settings → Script Properties → add '
+      + CALO_API_KEY_PROP + ' with the key as its value.');
+  }
+  return k;
+}
+
+function _caloHeaders_(style) {
+  var key = _caloApiKey_(), h = { 'Accept': 'application/json' };
+  if (style === 'bearer')      h['Authorization'] = 'Bearer ' + key;
+  else if (style === 'apikey') h['Authorization'] = key;
+  else                         h['x-api-key'] = key;
+  return h;
+}
+
+function callDashboardApi(path, params, style, rawQuery) {
+  var url = CALO_API_BASE + (path.charAt(0) === '/' ? path : '/' + path);
+  // Some query shapes only work unencoded — day[gte] percent-encodes to
+  // day%5Bgte%5D, and a server expecting literal brackets never sees the
+  // parameter at all. rawQuery is passed through exactly as written.
+  if (rawQuery) {
+    url += (url.indexOf('?') > -1 ? '&' : '?') + rawQuery;
+  } else if (params) {
+    var q = Object.keys(params)
+      .filter(function(k){ return params[k] !== undefined && params[k] !== null && params[k] !== ''; })
+      .map(function(k){ return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); });
+    if (q.length) url += (url.indexOf('?') > -1 ? '&' : '?') + q.join('&');
+  }
+  var res  = UrlFetchApp.fetch(url, { method: 'get', headers: _caloHeaders_(style || CALO_API_HEADER),
+                                      muteHttpExceptions: true });
+  var code = res.getResponseCode(), body = res.getContentText();
+  if (code >= 300) throw new Error('API returned ' + code + ' for ' + path + ': ' + body.substring(0, 300));
+  try { return JSON.parse(body); } catch (e) { return body; }
+}
+
+// Tries each path against each way of presenting the key and reports what
+// answers. Reads only — nothing is written anywhere.
+function probeDashboardApi(paths) {
+  var key;
+  try { key = _caloApiKey_(); }
+  catch (e) { Logger.log('STOPPED: ' + e.message); return e.message; }
+  Logger.log('Key found (' + key.length + ' characters). Probing ' + CALO_API_BASE + '\n');
+
+  var candidates = paths || [
+    '/ext/v1/stats/deliveries', '/ext/v1/stats/meal', '/ext/v1/stats/component',
+    '/ext/v1/stats/ingredient', '/ext/v1/stats/packaging/package-elements',
+    '/ext/v1/stats/packaging/cutlery-cooler-bags'
+  ];
+  var out = [], hits = [];
+  candidates.forEach(function(p) {
+    ['x-api-key', 'bearer', 'apikey'].forEach(function(style) {
+      var code, snippet;
+      try {
+        var res = UrlFetchApp.fetch(CALO_API_BASE + p,
+          { method: 'get', headers: _caloHeaders_(style), muteHttpExceptions: true });
+        code = res.getResponseCode();
+        snippet = res.getContentText().substring(0, 160).replace(/\s+/g, ' ');
+      } catch (e) { code = 'ERR'; snippet = e.message.substring(0, 160); }
+      var line = _caloPad_(p, 24) + ' ' + _caloPad_(style, 10) + ' ' + code + '  ' + snippet;
+      out.push(line);
+      if (code !== 404 && code !== 403) hits.push(line);
+    });
+  });
+  Logger.log(out.join('\n'));
+  Logger.log('\n──────── anything that is not 404/403 ────────');
+  Logger.log(hits.length ? hits.join('\n')
+    : 'Nothing answered — the routes are different. Send the SDK README, or one real request from DevTools → Network.');
+  return hits;
+}
+
+// ── READING COUNTS BY DATE ──────────────────────────────────
+// Shapes the response into { 'YYYY-MM-DD': count }. Several plausible
+// layouts are accepted, because the exact one is not known yet; anything
+// unrecognised is reported rather than silently read as nothing.
+function _caloNormaliseCounts_(json) {
+  var out = {}, n = 0;
+  var take = function(d, v) {
+    var ds = _caloYmd_(d);
+    if (!ds) return;
+    var num = Number(String(v).replace(/[^0-9.\-]/g, ''));
+    if (isNaN(num)) return;
+    out[ds] = num; n++;
+  };
+  var rows = json;
+  if (rows && !Array.isArray(rows)) {
+    if (Array.isArray(rows.data))        rows = rows.data;
+    else if (Array.isArray(rows.items))  rows = rows.items;
+    else if (Array.isArray(rows.results))rows = rows.results;
+    else if (Array.isArray(rows.stats))  rows = rows.stats;
+  }
+  if (Array.isArray(rows)) {
+    rows.forEach(function(r) {
+      if (!r || typeof r !== 'object') return;
+      var d = r.date || r.day || r.deliveryDate || r.d || r.ds;
+      var v = (r.count !== undefined) ? r.count
+            : (r.deliveries !== undefined) ? r.deliveries
+            : (r.total !== undefined) ? r.total
+            : (r.value !== undefined) ? r.value : undefined;
+      if (d !== undefined && v !== undefined) take(d, v);
+    });
+  } else if (rows && typeof rows === 'object') {
+    Object.keys(rows).forEach(function(k) {       // { '2026-10-01': 5123, … }
+      if (/^\d{4}-\d{2}-\d{2}/.test(k)) take(k, rows[k]);
+    });
+  }
+  return { counts: out, found: n };
+}
+
+function _caloCountsByDate_(from, to) {
+  if (!CALO_DELIVERY_STATS_PATH) {
+    throw new Error('CALO_DELIVERY_STATS_PATH is not set — run probeDashboardApi() to find the route.');
+  }
+  // The SDK takes day as { gte, lte }; over the wire that is day[gte]/day[lte].
+  var params = { 'day[gte]': from, 'day[lte]': to };
+  if (CALO_KITCHEN) params.kitchen = CALO_KITCHEN;
+  var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, params);
+  var norm = _caloNormaliseCounts_(json);
+  if (!norm.found) {
+    throw new Error('The API answered but no date/count pairs were recognised in it. '
+      + 'First 400 characters: ' + JSON.stringify(json).substring(0, 400));
+  }
+  return norm.counts;
+}
+
+function getLiveDeliveryStats(from, to) {
+  var ck = 'calo_live_' + (from || '') + '_' + (to || '');
+  try { var hit = CacheService.getScriptCache().get(ck); if (hit) return JSON.parse(hit); } catch (e) {}
+  try {
+    var payload = { ok: true, counts: _caloCountsByDate_(from, to), fetchedAt: new Date().toISOString() };
+    try { CacheService.getScriptCache().put(ck, JSON.stringify(payload), CALO_API_CACHE_TTL); } catch (e) {}
+    return payload;
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// Fetches a few days and prints exactly what came back, so the reader below
+// can be matched to the real shape rather than a guess at it.
+function testDeliveryStats() {
+  var to = _caloShift_(_caloYmd_(new Date()), -1);
+  var from = _caloShift_(to, -4);
+  Logger.log('GET ' + CALO_API_BASE + CALO_DELIVERY_STATS_PATH
+    + '  day[gte]=' + from + '  day[lte]=' + to
+    + (CALO_KITCHEN ? '  kitchen=' + CALO_KITCHEN : '  (no kitchen filter)'));
+  try {
+    var params = { 'day[gte]': from, 'day[lte]': to };
+    if (CALO_KITCHEN) params.kitchen = CALO_KITCHEN;
+    var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, params);
+    Logger.log('\n──── raw response ────\n' + JSON.stringify(json, null, 2).substring(0, 4000));
+    var norm = _caloNormaliseCounts_(json);
+    Logger.log('\n──── dates the reader recognised: ' + norm.found + ' ────');
+    Logger.log(norm.found ? JSON.stringify(norm.counts, null, 2)
+      : 'None. Send me the raw response above and I will match the reader to it.');
+    return json;
+  } catch (e) {
+    Logger.log('\nFAILED: ' + e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+// The first live call returned 60,245,872 deliveries across seven currencies
+// for a five-day window — the whole dataset, so the date filter was dropped.
+// This tries each way the filter might be spelled and prints the count each one
+// gives back. Any encoding the API actually honours will return far less than
+// the unfiltered baseline; the ones it ignores will match it exactly.
+function testDateFilterEncodings() {
+  var to = _caloShift_(_caloYmd_(new Date()), -1);
+  var from = _caloShift_(to, -4);
+  var q = function(raw) { return { raw: raw }; };
+  var attempts = [
+    ['no filter (baseline)',      null, null],
+    ['day[gte] encoded',          { 'day[gte]': from, 'day[lte]': to }, null],
+    ['day[gte] LITERAL brackets', null, 'day[gte]=' + from + '&day[lte]=' + to],
+    ['filter[day][gte] literal',  null, 'filter[day][gte]=' + from + '&filter[day][lte]=' + to],
+    ['where[day][gte] literal',   null, 'where[day][gte]=' + from + '&where[day][lte]=' + to],
+    ['day as JSON',               { day: JSON.stringify({ gte: from, lte: to }) }, null],
+    ['query as JSON',             { query: JSON.stringify({ day: { gte: from, lte: to } }) }, null],
+    ['filters as JSON',           { filters: JSON.stringify({ day: { gte: from, lte: to } }) }, null],
+    ['from / to',                 { from: from, to: to }, null],
+    ['country=AE',                { country: 'AE' }, null],
+    ['kitchen=BH001 (the README\u2019s own example)', { kitchen: 'BH001' }, null]
+  ];
+
+  Logger.log('Window ' + from + ' to ' + to + '.');
+  Logger.log('The count is a live running total, so it creeps up between calls.');
+  Logger.log('Only a count far BELOW the baseline means a parameter was honoured.\n');
+
+  var first = null, rows = [];
+  attempts.forEach(function(a) {
+    var label = a[0], line;
+    try {
+      var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, a[1], null, a[2]);
+      var count = (json && json.count !== undefined) ? json.count : null;
+      if (first === null) first = count;
+      var verdict;
+      if (count === null) verdict = 'no count in response';
+      else if (count < first * 0.9) verdict = '*** HONOURED — ' + Math.round(100 - count / first * 100) + '% smaller ***';
+      else if (count >= first) verdict = 'ignored (same or drifted up)';
+      else verdict = 'ignored (within noise)';
+      line = _caloPad_(label, 34) + ' count=' + _caloPad_(String(count), 12) + verdict;
+    } catch (e) {
+      line = _caloPad_(label, 34) + ' ERROR  ' + e.message;
+    }
+    rows.push(line); Logger.log(line);
+  });
+
+  // Re-read the baseline at the end: the gap against the first one is the drift,
+  // which is what every "ignored" row above is sitting inside.
+  try {
+    var again = callDashboardApi(CALO_DELIVERY_STATS_PATH, null, null, null);
+    Logger.log('\nbaseline re-read at the end: ' + again.count
+      + '   (drift during this run: +' + (again.count - first) + ')');
+  } catch (e) {}
+
+  var win = rows.filter(function(r) { return r.indexOf('HONOURED') > -1; });
+  Logger.log('\n──── result ────');
+  Logger.log(win.length ? win.join('\n')
+    : 'Every parameter was ignored — the endpoint returns the whole dataset regardless.\n'
+    + 'This needs an answer from the service owners; send them the message I gave you.');
+  return rows;
+}
+
+// The endpoint validates its query and says what it expected when something is
+// wrong — "expected object, received string at queryStringParameters.filter" is
+// how the parameter name turned up at all. This sends deliberately wrong shapes
+// to make it describe the rest, then tries the forms that description implies.
+function probeFilterSchema() {
+  var to = _caloShift_(_caloYmd_(new Date()), -1);
+  var from = _caloShift_(to, -4);
+
+  var tries = [
+    // Wrong on purpose: the complaint names what it wanted instead.
+    ['filter as a bare string',        null, 'filter=x'],
+    ['filter[day] as a bare string',   null, 'filter[day]=x'],
+    ['filter[day][gte] as a number',   null, 'filter[day][gte]=12345'],
+    ['filter[nonsense]=1',             null, 'filter[nonsense]=1'],
+    ['groupBy as a bare string',       null, 'groupBy=x'],
+    ['country as a bare string',       null, 'country=x'],
+    // Then the forms "filter must be an object" actually implies.
+    ['filter[day][gte] + [lte]',       null, 'filter[day][gte]=' + from + '&filter[day][lte]=' + to],
+    ['filter[date][gte] + [lte]',      null, 'filter[date][gte]=' + from + '&filter[date][lte]=' + to],
+    ['filter[deliveryDate][gte]',      null, 'filter[deliveryDate][gte]=' + from + '&filter[deliveryDate][lte]=' + to],
+    ['filter[createdAt][gte]',         null, 'filter[createdAt][gte]=' + from + '&filter[createdAt][lte]=' + to],
+    ['filter[day][eq] single day',     null, 'filter[day][eq]=' + to],
+    ['filter[country]=AE',             null, 'filter[country]=AE'],
+    ['filter[country][eq]=AE',         null, 'filter[country][eq]=AE']
+  ];
+
+  Logger.log('Window ' + from + ' to ' + to + '.');
+  Logger.log('A 400 here is useful — it names what the endpoint expected.\n');
+
+  var first = null;
+  tries.forEach(function(t) {
+    var label = t[0];
+    try {
+      var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, t[1], null, t[2]);
+      var count = (json && json.count !== undefined) ? json.count : null;
+      if (first === null) first = count;
+      var verdict = (count !== null && first && count < first * 0.9)
+        ? '*** HONOURED — ' + Math.round(100 - count / first * 100) + '% smaller ***'
+        : 'accepted, no effect';
+      Logger.log(_caloPad_(label, 32) + ' count=' + _caloPad_(String(count), 12) + verdict);
+    } catch (e) {
+      Logger.log(_caloPad_(label, 32) + ' 400 →\n    ' + String(e.message).replace(/\n/g, '\n    '));
+    }
+  });
+  Logger.log('\n──── read the 400s above: they describe the schema ────');
+}
+
+// ── THE SYNC ────────────────────────────────────────────────
+// Reads the DELIVERY tab's column pairs: an even column holds dates, the
+// one after it holds that day's count. Returns where each date lives and
+// whether it already carries a figure.
+function _caloSheetIndex_(sheet) {
+  var all = sheet.getDataRange().getValues();
+  var idx = {};
+  for (var r = 1; r < all.length; r++) {
+    for (var c = 0; c + 1 < all[r].length; c += 2) {
+      var ds = _caloYmd_(all[r][c]);
+      if (!ds || idx[ds]) continue;
+      var raw = all[r][c + 1];
+      var cur = Number(String(raw === null || raw === undefined ? '' : raw).replace(/[^0-9.\-]/g, ''));
+      idx[ds] = { row: r + 1, col: c + 2, value: isNaN(cur) ? 0 : cur,
+                  blank: (raw === '' || raw === null || raw === undefined || cur === 0) };
+    }
+  }
+  return { idx: idx, all: all };
+}
+
+function syncDeliveriesToSheet(opts) {
+  // A time-driven trigger calls the handler with an event object; taken as
+  // options that would silently turn settings on.
+  if (!opts || typeof opts !== 'object' || opts.authMode || opts.triggerUid) opts = {};
+  var dryRun    = !!opts.dryRun;
+  var overwrite = (opts.overwrite === undefined) ? CALO_SYNC_OVERWRITE : !!opts.overwrite;
+  var days      = opts.days || CALO_SYNC_DAYS;
+
+  var today = _caloYmd_(new Date());
+  var to    = opts.to || _caloShift_(today, -1);        // yesterday: today has not closed
+  var from  = opts.from || _caloShift_(to, -(days - 1));
+  if (to >= today) to = _caloShift_(today, -1);
+
+  var rep = { ok: true, dryRun: dryRun, overwrite: overwrite, from: from, to: to,
+              filled: [], alreadySet: [], differs: [], notInApi: [], wrote: 0 };
+  try {
+    var counts = _caloCountsByDate_(from, to);
+    var ss     = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var sheet  = ss.getSheetByName('DELIVERIES');
+    if (!sheet) throw new Error('DELIVERIES sheet not found.');
+    var index  = _caloSheetIndex_(sheet).idx;
+
+    for (var d = from; d <= to; d = _caloShift_(d, 1)) {
+      var apiVal = counts[d];
+      if (apiVal === undefined) { rep.notInApi.push(d); continue; }
+      var cell = index[d];
+
+      if (cell && !cell.blank) {
+        if (Math.abs(cell.value - apiVal) < 0.5) { rep.alreadySet.push(d); continue; }
+        rep.differs.push({ date: d, sheet: cell.value, api: apiVal });
+        if (!overwrite) continue;                        // reported, not replaced
+      }
+      if (dryRun) { rep.filled.push({ date: d, value: apiVal, newRow: !cell }); continue; }
+
+      if (cell) sheet.getRange(cell.row, cell.col).setValue(apiVal);
+      else      addDeliveryRecord(d, apiVal);            // creates the row in the right month pair
+      rep.filled.push({ date: d, value: apiVal, newRow: !cell });
+      rep.wrote++;
+    }
+
+    if (rep.wrote) { SpreadsheetApp.flush(); _invalidateCache(); }
+  } catch (e) {
+    rep.ok = false; rep.error = e.message;
+  }
+  _caloLogReport_(rep);
+  return rep;
+}
+
+// Shows exactly what a run would change, and changes nothing.
+function previewDeliverySync(days) {
+  return syncDeliveriesToSheet({ dryRun: true, days: days || CALO_SYNC_DAYS });
+}
+
+// Lists only the days where the sheet and the API disagree. Writes nothing,
+// whatever CALO_SYNC_OVERWRITE is set to.
+function reconcileDeliveries(from, to) {
+  var rep = syncDeliveriesToSheet({ dryRun: true, overwrite: true, from: from, to: to });
+  Logger.log('\n──────── disagreements only ────────');
+  Logger.log(rep.differs.length
+    ? rep.differs.map(function(x){ return x.date + '   sheet ' + x.sheet + '   api ' + x.api
+        + '   (' + (x.api - x.sheet > 0 ? '+' : '') + (x.api - x.sheet) + ')'; }).join('\n')
+    : 'None — the sheet and the API agree on every day in range.');
+  return rep.differs;
+}
+
+function _caloLogReport_(rep) {
+  var L = [];
+  L.push(rep.dryRun ? 'DRY RUN — nothing was written.' : 'SYNC — ' + rep.wrote + ' day(s) written.');
+  L.push('Window: ' + rep.from + ' to ' + rep.to + (rep.overwrite ? '   (overwrite ON)' : ''));
+  if (!rep.ok) L.push('FAILED: ' + rep.error);
+  L.push('');
+  L.push('filled      ' + rep.filled.length + (rep.filled.length
+    ? '   ' + rep.filled.map(function(f){ return f.date + '=' + f.value + (f.newRow ? '*' : ''); }).join(', ') : ''));
+  L.push('already set ' + rep.alreadySet.length + '   (left alone)');
+  L.push('differs     ' + rep.differs.length + (rep.differs.length
+    ? '   ' + rep.differs.map(function(x){ return x.date + ' sheet=' + x.sheet + ' api=' + x.api; }).join(', ') : ''));
+  L.push('not in api  ' + rep.notInApi.length + (rep.notInApi.length ? '   ' + rep.notInApi.join(', ') : ''));
+  if (rep.differs.length && !rep.overwrite) {
+    L.push('');
+    L.push('Days above under "differs" were NOT changed. Run reconcileDeliveries() to look at them,');
+    L.push('or syncDeliveriesToSheet({overwrite:true}) to let the API figure win.');
+  }
+  L.push('* = a new row was added for that date');
+  Logger.log(L.join('\n'));
+}
+
+// ── DAILY TRIGGER ───────────────────────────────────────────
+function createDeliverySyncTrigger() {
+  removeDeliverySyncTrigger();
+  ScriptApp.newTrigger('syncDeliveriesToSheet').timeBased().atHour(2).everyDays(1).create();
+  return { ok: true, note: 'Runs daily around 02:00, filling days that have closed.' };
+}
+
+function removeDeliverySyncTrigger() {
+  var n = 0;
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'syncDeliveriesToSheet') { ScriptApp.deleteTrigger(t); n++; }
+  });
+  return { ok: true, removed: n };
+}
+
+// ── HELPERS ─────────────────────────────────────────────────
+function _caloYmd_(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return v.getFullYear() + '-' + _caloP2_(v.getMonth() + 1) + '-' + _caloP2_(v.getDate());
+  }
+  var s = String(v === null || v === undefined ? '' : v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0, 10);
+  var d = new Date(s);
+  if (!isNaN(d.getTime()) && s) {
+    return d.getFullYear() + '-' + _caloP2_(d.getMonth() + 1) + '-' + _caloP2_(d.getDate());
+  }
+  return '';
+}
+
+function _caloShift_(ymd, days) {
+  var p = String(ymd).split('-');
+  var d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+  d.setDate(d.getDate() + days);
+  return _caloYmd_(d);
+}
+
+function _caloP2_(n)  { return String(n).length === 1 ? '0' + n : String(n); }
+function _caloPad_(s, w) { s = String(s); while (s.length < w) s += ' '; return s; }
