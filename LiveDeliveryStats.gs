@@ -255,7 +255,7 @@ function testDateFilterEncodings() {
       else verdict = 'ignored (within noise)';
       line = _caloPad_(label, 34) + ' count=' + _caloPad_(String(count), 12) + verdict;
     } catch (e) {
-      line = _caloPad_(label, 34) + ' ERROR  ' + e.message.substring(0, 140);
+      line = _caloPad_(label, 34) + ' ERROR  ' + e.message;
     }
     rows.push(line); Logger.log(line);
   });
@@ -274,6 +274,53 @@ function testDateFilterEncodings() {
     : 'Every parameter was ignored — the endpoint returns the whole dataset regardless.\n'
     + 'This needs an answer from the service owners; send them the message I gave you.');
   return rows;
+}
+
+// The endpoint validates its query and says what it expected when something is
+// wrong — "expected object, received string at queryStringParameters.filter" is
+// how the parameter name turned up at all. This sends deliberately wrong shapes
+// to make it describe the rest, then tries the forms that description implies.
+function probeFilterSchema() {
+  var to = _caloShift_(_caloYmd_(new Date()), -1);
+  var from = _caloShift_(to, -4);
+
+  var tries = [
+    // Wrong on purpose: the complaint names what it wanted instead.
+    ['filter as a bare string',        null, 'filter=x'],
+    ['filter[day] as a bare string',   null, 'filter[day]=x'],
+    ['filter[day][gte] as a number',   null, 'filter[day][gte]=12345'],
+    ['filter[nonsense]=1',             null, 'filter[nonsense]=1'],
+    ['groupBy as a bare string',       null, 'groupBy=x'],
+    ['country as a bare string',       null, 'country=x'],
+    // Then the forms "filter must be an object" actually implies.
+    ['filter[day][gte] + [lte]',       null, 'filter[day][gte]=' + from + '&filter[day][lte]=' + to],
+    ['filter[date][gte] + [lte]',      null, 'filter[date][gte]=' + from + '&filter[date][lte]=' + to],
+    ['filter[deliveryDate][gte]',      null, 'filter[deliveryDate][gte]=' + from + '&filter[deliveryDate][lte]=' + to],
+    ['filter[createdAt][gte]',         null, 'filter[createdAt][gte]=' + from + '&filter[createdAt][lte]=' + to],
+    ['filter[day][eq] single day',     null, 'filter[day][eq]=' + to],
+    ['filter[country]=AE',             null, 'filter[country]=AE'],
+    ['filter[country][eq]=AE',         null, 'filter[country][eq]=AE']
+  ];
+
+  Logger.log('Window ' + from + ' to ' + to + '.');
+  Logger.log('A 400 here is useful — it names what the endpoint expected.\n');
+
+  var first = null;
+  tries.forEach(function(t) {
+    var label = t[0];
+    try {
+      var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, t[1], null, t[2]);
+      var count = (json && json.count !== undefined) ? json.count : null;
+      if (first === null) first = count;
+      var verdict = (count !== null && first && count < first * 0.9)
+        ? '*** HONOURED — ' + Math.round(100 - count / first * 100) + '% smaller ***'
+        : 'accepted, no effect';
+      Logger.log(_caloPad_(label, 32) + ' count=' + _caloPad_(String(count), 12) + verdict);
+    } catch (e) {
+      Logger.log(_caloPad_(label, 32) + ' 400 →\n    ' + String(e.message).replace(/\n/g, '\n    '));
+    }
+  });
+  Logger.log('\n──── read the 400s above: they describe the schema ────');
 }
 
 // ── THE SYNC ────────────────────────────────────────────────
