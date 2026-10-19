@@ -209,6 +209,58 @@ function testDeliveryStats() {
   }
 }
 
+// The first live call returned 60,245,872 deliveries across seven currencies
+// for a five-day window — the whole dataset, so the date filter was dropped.
+// This tries each way the filter might be spelled and prints the count each one
+// gives back. Any encoding the API actually honours will return far less than
+// the unfiltered baseline; the ones it ignores will match it exactly.
+function testDateFilterEncodings() {
+  var to = _caloShift_(_caloYmd_(new Date()), -1);
+  var from = _caloShift_(to, -4);
+  var attempts = [
+    ['no filter at all (baseline)', {}],
+    ['day[gte] / day[lte]',   { 'day[gte]': from, 'day[lte]': to }],
+    ['day.gte / day.lte',     { 'day.gte': from, 'day.lte': to }],
+    ['day as JSON',           { day: JSON.stringify({ gte: from, lte: to }) }],
+    ['from / to',             { from: from, to: to }],
+    ['startDate / endDate',   { startDate: from, endDate: to }],
+    ['gte / lte',             { gte: from, lte: to }],
+    ['dateFrom / dateTo',     { dateFrom: from, dateTo: to }],
+    ['a single day[eq]',      { 'day[eq]': to }],
+    ['a single day',          { day: to }],
+    ['brackets + groupBy=day',{ 'day[gte]': from, 'day[lte]': to, groupBy: 'day' }],
+    ['brackets + country=AE', { 'day[gte]': from, 'day[lte]': to, country: 'AE' }]
+  ];
+  Logger.log('Window ' + from + ' to ' + to + ' (5 days).');
+  Logger.log('An encoding that works returns far fewer than the baseline.\n');
+
+  var baseline = null, rows = [];
+  attempts.forEach(function(a) {
+    var label = a[0], params = a[1], line;
+    try {
+      var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, params);
+      var count = (json && json.count !== undefined) ? json.count : null;
+      var keys  = json && typeof json === 'object' ? Object.keys(json).join(',') : typeof json;
+      if (baseline === null) baseline = count;
+      var verdict = (count === null) ? '?'
+                  : (count === baseline && label.indexOf('baseline') < 0) ? 'IGNORED'
+                  : (count === baseline) ? 'baseline' : '*** FILTERED ***';
+      line = _caloPad_(label, 26) + ' count=' + _caloPad_(String(count), 12) + ' ' + verdict + '   keys: ' + keys;
+    } catch (e) {
+      line = _caloPad_(label, 26) + ' ERROR  ' + e.message.substring(0, 120);
+    }
+    rows.push(line);
+    Logger.log(line);
+  });
+
+  Logger.log('\n──── anything marked *** FILTERED *** is the one we want ────');
+  var win = rows.filter(function(r){ return r.indexOf('*** FILTERED ***') > -1; });
+  Logger.log(win.length ? win.join('\n')
+    : 'None of them narrowed it. The filter is spelled some other way, or this '
+      + 'endpoint only ever returns a total. Send me this whole log.');
+  return rows;
+}
+
 // ── THE SYNC ────────────────────────────────────────────────
 // Reads the DELIVERY tab's column pairs: an even column holds dates, the
 // one after it holds that day's count. Returns where each date lives and
