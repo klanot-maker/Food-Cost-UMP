@@ -309,41 +309,66 @@ var CALO_TRUTH = {
   '2026-11-06': 3807
 };
 
+/** 'AE001' → 'AE'. The dashboard sends country alongside kitchen. */
+function _caloCountry_() {
+  return String(_caloKitchen_()).substring(0, 2).toUpperCase();
+}
+
 /**
- * Every way the SDK offers to narrow the set, plus a few spellings of each
- * because the external API takes deliveryStatus as a free string and does
- * not publish its vocabulary.
+ * Candidates, best first.
  *
- * `measure: true` marks a row that is not a candidate answer. Those are
- * run against one day only, to size each excluded group, so that if nothing
- * matches outright the shortfall can be read rather than guessed at.
+ * The first two mirror the Calo dashboard's own standard filter, read off
+ * its Filters panel:
+ *
+ *     Country  AE          Skipped  False
+ *     Kitchen  AE001       Status   Upcoming, Not Paid
+ *
+ * "Not Paid" is the SDK's `paymentRequired`. The important part is that
+ * `status` carries TWO values — every earlier attempt passed one, which is
+ * why none of them could ever have landed on the operation's figures. A
+ * delivery awaiting payment is still a delivery the kitchen is making.
+ *
+ * Kitchen already implies the country, so it is tried both ways: a filter
+ * the API does not recognise is ignored rather than refused, and an ignored
+ * `country` would quietly widen the result.
+ *
+ * `measure: true` marks a row that is not an answer. Those run against one
+ * day only, to size each group, so a near miss can be read off rather than
+ * guessed at.
  */
-var _CALO_STATUS_TRIES = [
-  { label: '(no filter)',                    f: {} },
+function _caloStatusTries_() {
+  var UP_NP = ['upcoming', 'paymentRequired'];
+  return [
+    { label: 'DASHBOARD skipped=false status=up+notPaid',
+      f: { skipped: false, status: UP_NP } },
+    { label: 'DASHBOARD + country',
+      f: { country: _caloCountry_(), skipped: false, status: UP_NP } },
 
-  { label: 'skipped=false',                  f: { skipped: false } },
-  { label: 'expired=false',                  f: { expired: false } },
-  { label: 'skipped=false expired=false',    f: { skipped: false, expired: false } },
+    // Same idea, in case "Not Paid" is spelled differently on the wire.
+    { label: 'skipped=false status=upcoming,notPaid',
+      f: { skipped: false, status: ['upcoming', 'notPaid'] } },
+    { label: 'skipped=false status=upcoming,not_paid',
+      f: { skipped: false, status: ['upcoming', 'not_paid'] } },
+    { label: 'skipped=false status=upcoming,unpaid',
+      f: { skipped: false, status: ['upcoming', 'unpaid'] } },
 
-  { label: 'subscriptionStatus=ongoing',     f: { subscriptionStatus: ['ongoing'] } },
-  { label: 'subStatus=ongoing skipped=false',f: { subscriptionStatus: ['ongoing'], skipped: false } },
+    // Each half alone, to show which part does the work.
+    { label: 'status=upcoming+notPaid only',   f: { status: UP_NP } },
+    { label: 'skipped=false status=upcoming',  f: { skipped: false, status: ['upcoming'] } },
+    { label: 'skipped=false',                  f: { skipped: false } },
+    { label: '(no filter)',                    f: {} },
 
-  { label: 'status=upcoming',                f: { status: ['upcoming'] } },
-  { label: 'deliveryStatus=confirmed',       f: { deliveryStatus: 'confirmed' } },
-  { label: 'deliveryStatus=CONFIRMED',       f: { deliveryStatus: 'CONFIRMED' } },
-  { label: 'deliveryStatus=delivered',       f: { deliveryStatus: 'delivered' } },
-  { label: 'deliveryStatus=DELIVERED',       f: { deliveryStatus: 'DELIVERED' } },
+    { label: 'subscriptionStatus=ongoing',     f: { subscriptionStatus: ['ongoing'] } },
+    { label: 'deliveryStatus=delivered',       f: { deliveryStatus: 'delivered' } },
 
-  { label: 'emptyFood=false',                f: { emptyFood: false } },
-
-  // Sized against one day only — how big is each group we may need to drop?
-  { label: '  measure status=cancelled',       f: { status: ['cancelled'] },       measure: true },
-  { label: '  measure status=paused',          f: { status: ['paused'] },          measure: true },
-  { label: '  measure status=suspended',       f: { status: ['suspended'] },       measure: true },
-  { label: '  measure status=paymentRequired', f: { status: ['paymentRequired'] }, measure: true },
-  { label: '  measure skipped=true',           f: { skipped: true },               measure: true },
-  { label: '  measure expired=true',           f: { expired: true },               measure: true }
-];
+    // Sized against one day only.
+    { label: '  measure status=cancelled',       f: { status: ['cancelled'] },       measure: true },
+    { label: '  measure status=paused',          f: { status: ['paused'] },          measure: true },
+    { label: '  measure status=suspended',       f: { status: ['suspended'] },       measure: true },
+    { label: '  measure status=paymentRequired', f: { status: ['paymentRequired'] }, measure: true },
+    { label: '  measure skipped=true',           f: { skipped: true },               measure: true }
+  ];
+}
 
 /**
  * Finds the filter that reproduces the Calo dashboard, across every day in
@@ -373,7 +398,7 @@ function caloFindFilter() {
 
   var best = null, bestScore = -1;
 
-  _CALO_STATUS_TRIES.forEach(function(t) {
+  _caloStatusTries_().forEach(function(t) {
     if (t.measure) return;                     // sized separately, below
     var hits = 0, cells = [], anyFail = false;
     days.forEach(function(d) {
@@ -398,7 +423,7 @@ function caloFindFilter() {
   say('── how ' + probe + ' breaks down  (unfiltered ' +
       (base.ok ? base.count : '?') + ', dashboard ' + CALO_TRUTH[probe] + ', so ' +
       (base.ok ? (base.count - CALO_TRUTH[probe]) + ' rows must come out' : 'unknown') + ')');
-  _CALO_STATUS_TRIES.forEach(function(t) {
+  _caloStatusTries_().forEach(function(t) {
     if (!t.measure) return;
     var c = _caloCountFor_(probe, t.f);
     say('   ' + _caloPadRight_(t.label.replace(/^\s+measure\s+/, ''), 24) +
