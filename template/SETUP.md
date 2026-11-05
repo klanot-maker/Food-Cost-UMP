@@ -1,5 +1,16 @@
 # Setting up the Ops Dashboard for a new market
 
+> **This file is not part of the project. Do not paste it into Apps Script.**
+>
+> It is instructions, written in English, not code. Apps Script will try to
+> read it as JavaScript and stop on the first line with
+> `SyntaxError: Invalid or unexpected token`. If that has already happened,
+> open the file's ⋮ menu in the editor and choose **Remove** — nothing else
+> is affected.
+>
+> Keep this open in a browser or a text editor while you work. Only the five
+> files listed in step 2 go into Apps Script.
+
 This folder is a working copy of the UAE dashboard with every UAE-specific
 value taken out. Nothing in here points at UAE's data, and nothing you do in
 here can reach it.
@@ -104,13 +115,24 @@ That is why clearing the numbers is enough and no re-mapping is needed.
 
 1. Open your **operations workbook** → Extensions → Apps Script.
 2. Delete the `Code.gs` file the new project starts with.
-3. Create one file per item in this folder and paste the contents in:
-   - `Config.gs`
-   - `Dashboard.gs`
-   - `CaloDeliveries.gs`
-   - `SlackMonthlySummary.gs`
-   - `Index.html` — this one is an **HTML file**, not a script. Use
-     File → New → HTML file and name it exactly `Index`.
+3. Create these **five files and no others**, and paste the contents in:
+
+   | Create it as | Name it | Paste in |
+   |---|---|---|
+   | Script | `Config` | `1-Config.txt` |
+   | Script | `Dashboard` | `2-Dashboard.txt` |
+   | Script | `CaloDeliveries` | `3-CaloDeliveries.txt` |
+   | Script | `SlackMonthlySummary` | `4-SlackMonthlySummary.txt` |
+   | **HTML** | `Index` | `5-Index.html.txt` |
+
+   Apps Script adds the extension itself, so type the name without one.
+
+   **`Index` must be created as an HTML file** — File → New → HTML file.
+   Pasted into a script file it is thousands of syntax errors.
+
+   **`SETUP.md` is not one of the five.** It is this document. Pasting it in
+   gives `SyntaxError: Invalid or unexpected token` on line 1.
+
 4. Save.
 
 ---
