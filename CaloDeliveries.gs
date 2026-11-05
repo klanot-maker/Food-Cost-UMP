@@ -682,14 +682,29 @@ function _caloSync_(weeksBack, weeksForward, previewOnly) {
     var c = _caloCountFor_(ds, extra);
     if (!c.ok) { row('—', 'FAILED: ' + c.why); failed++; return; }
 
-    // The one case where the API is not yet worth believing. A future day
-    // with no rows has not been generated, not been cancelled — writing 0
-    // over a planned figure would destroy real information to record an
-    // absence. Past days are different: there 0 is an answer.
-    if (isFuture && c.count === 0) {
-      row('0', 'not generated yet — left alone');
-      held++;
-      return;
+    // Zero is the one answer never written over something real.
+    //
+    // On a future day it means the deliveries have not been generated yet,
+    // not that they were cancelled. On a past day it is almost certainly the
+    // API having a bad moment: Calo delivers every day, so a settled day that
+    // suddenly reads 0 is a glitch, and letting an unattended 06:00 job
+    // replace 5,321 with 0 would take the day out of the dashboard entirely —
+    // it drops any count of zero or less from the series.
+    //
+    // A real zero day can still be typed in by hand. A machine should not be
+    // the thing that decides a day had no deliveries.
+    if (c.count === 0) {
+      if (isFuture) {
+        row('0', 'not generated yet — left alone');
+        held++;
+        return;
+      }
+      if (now) {
+        row('0', 'API says 0 but the sheet has ' + now + ' — left alone, check the dashboard');
+        held++;
+        return;
+      }
+      // Sheet blank or already 0: nothing of value to lose either way.
     }
 
     if (now === c.count) { row(c.count, 'already correct'); skipped++; return; }
