@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>UMP Operations Dashboard</title>
+<title>KMP Operation Dashboard</title>
 <script>
 var _RESET_TOKEN='<?= resetToken ?>';
 // Market facts from Config.gs, handed over by doGet before anything renders,
@@ -874,7 +874,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
     <div class="lg-logo">
       <div class="lg-logo-text">CALO</div>
       <div class="lg-logo-divider"></div>
-      <div class="lg-logo-sub">UMP Operations Dashboard</div>
+      <div class="lg-logo-sub">KMP Operation Dashboard</div>
     </div>
 
     <!-- Sign-in form -->
@@ -1002,7 +1002,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
     </div>
 
     <div class="lg-footer">
-      © 2026 CALO Food Company<br>UMP Operations Dashboard · All rights reserved
+      © 2026 CALO Food Company<br>KMP Operation Dashboard · All rights reserved
     </div>
   </div>
 </div>
@@ -1041,7 +1041,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
       </svg>
     </div>
     <div class="sb-wordmark">CALO</div>
-    <div class="sb-ttl">UMP Operations<br>Dashboard</div>
+    <div class="sb-ttl">KMP Operation<br>Dashboard</div>
     <div class="sb-build" id="sbBuild" title="Which build this page came from"></div>
   </div>
   <nav class="sb-nav">
@@ -1055,7 +1055,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
     </button>
     <button class="ni" data-page="complaints" onclick="showPage('complaints')">
       <span class="ni-emoji">📋</span>
-      <span class="ni-label">UMP Complaints</span>
+      <span class="ni-label">KMP Complaints</span>
     </button>
     <button class="ni" data-page="staff" onclick="showPage('staff')">
       <span class="ni-emoji">👷</span>
@@ -1255,7 +1255,7 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
       </div>
     </div>
 
-    <!-- PAGE: UMP COMPLAINTS -->
+    <!-- PAGE: KMP COMPLAINTS -->
     <div class="page" id="page-complaints">
       <div class="tgt-banner">
         <span class="tbl-hd">Monthly targets:</span>
@@ -1686,7 +1686,7 @@ var _dodChartInst = null;
 
 var PAGE_TITLES = {
   financial:  'Financial Cost Analysis',
-  complaints: 'UMP Complaints',
+  complaints: 'KMP Complaints',
   staff:      'Production Staff Count',
   capacity:   'Capacity Overview',
   operation:  'Operation Overview',
@@ -2213,10 +2213,10 @@ function _lgcRenderInvoiceList(ym,invs){
 // read of a PDF should never become a silent cost figure.
 // ════════════════════════════════════════════════════════════
 var LGC_INVOICES=[];
-// Must match UMP_BUILD in Dashboard.gs. A mismatch means the two files were
+// Must match KMP_BUILD in Dashboard.gs. A mismatch means the two files were
 // not deployed together, which looks exactly like bad data unless it is said
 // out loud.
-var UMP_BUILD_UI='2026-11-05.dlv2';
+var KMP_BUILD_UI='2026-11-05.dlv2';
 // Manpower is built from the staff phase, which lands separately from the
 // Operation Overview phase. Without knowing which state that phase is in, an
 // empty card looked identical whether the data was still coming, had failed to
@@ -2232,19 +2232,19 @@ var _staffIsReal=false;
 function _sbBuildLabel(){
   var el=document.getElementById('sbBuild');
   if(!el) return;
-  var srv=(typeof UMP_BUILD_SERVER!=='undefined'&&UMP_BUILD_SERVER)?UMP_BUILD_SERVER:null;
-  if(srv&&srv!==UMP_BUILD_UI){
-    el.textContent='BUILD '+UMP_BUILD_UI+' \u2260 '+srv;
+  var srv=(typeof KMP_BUILD_SERVER!=='undefined'&&KMP_BUILD_SERVER)?KMP_BUILD_SERVER:null;
+  if(srv&&srv!==KMP_BUILD_UI){
+    el.textContent='BUILD '+KMP_BUILD_UI+' \u2260 '+srv;
     el.className='sb-build warn';
-    el.title='This page is build '+UMP_BUILD_UI+' but the server is running '+srv
+    el.title='This page is build '+KMP_BUILD_UI+' but the server is running '+srv
             +'. One of the two files was not deployed.';
   } else {
-    el.textContent='BUILD '+UMP_BUILD_UI;
+    el.textContent='BUILD '+KMP_BUILD_UI;
     el.className='sb-build';
     el.title='The build this page was served from';
   }
 }
-var UMP_BUILD_SERVER=null;
+var KMP_BUILD_SERVER=null;
 var _lgcEditMode=false;
 var _lgcEditingId=null;
 // The five components, plus "other" for anything an invoice carries that fits
@@ -2280,7 +2280,7 @@ function _lgcLoadInvoices(cb,force){
   google.script.run
     .withSuccessHandler(function(res){
       LGC_INVOICES=(res&&res.invoices)||[];
-      UMP_BUILD_SERVER=(res&&res.build)||null;
+      KMP_BUILD_SERVER=(res&&res.build)||null;
       _lgcInvLoaded=true;
       if(cb) cb();
     })
@@ -2329,7 +2329,7 @@ function _lgcInvFilePicked(){
 // mis-assigns amounts to line descriptions, and letting it run just writes
 // more bad data into the sheet that has to be undone later.
 function _lgcBackendCurrent(){
-  return !!UMP_BUILD_SERVER && UMP_BUILD_SERVER===UMP_BUILD_UI;
+  return !!KMP_BUILD_SERVER && KMP_BUILD_SERVER===KMP_BUILD_UI;
 }
 
 function readInvoicePdf(){
@@ -2337,7 +2337,7 @@ function readInvoicePdf(){
   if(!_lgcBackendCurrent()){
     document.getElementById('lgcInvUploadMsg').innerHTML=
       '<span style="color:var(--red);font-weight:700;">Dashboard.gs on the server is older than this page'
-      +(UMP_BUILD_SERVER?' (server '+UMP_BUILD_SERVER+', page '+UMP_BUILD_UI+')':'')+'.</span><br>'
+      +(KMP_BUILD_SERVER?' (server '+KMP_BUILD_SERVER+', page '+KMP_BUILD_UI+')':'')+'.</span><br>'
       +'Reading a PDF with the old code puts the wrong amounts against the wrong lines, so it is blocked. '
       +'Paste the matching Dashboard.gs, then Deploy \u2192 Manage deployments \u2192 Edit \u2192 New version \u2192 Deploy. '
       +'You can still <a href="#" onclick="startBlankInvoice();return false;" style="color:var(--br);font-weight:700;">enter it manually</a>.';
@@ -2604,12 +2604,12 @@ function _lgcCheckBuild(){
   var el=document.getElementById('lgcBuild');
   if(!el) return;
   _sbBuildLabel();
-  if(UMP_BUILD_SERVER&&UMP_BUILD_SERVER!==UMP_BUILD_UI){
-    el.textContent='This page is build '+UMP_BUILD_UI+' but the server is running build '
-      +UMP_BUILD_SERVER+'. Paste the matching Dashboard.gs and deploy a new version — '
+  if(KMP_BUILD_SERVER&&KMP_BUILD_SERVER!==KMP_BUILD_UI){
+    el.textContent='This page is build '+KMP_BUILD_UI+' but the server is running build '
+      +KMP_BUILD_SERVER+'. Paste the matching Dashboard.gs and deploy a new version — '
       +'until then the invoice figures come from the older reader.';
     el.style.display='block';
-  } else if(!UMP_BUILD_SERVER&&_lgcInvLoaded){
+  } else if(!KMP_BUILD_SERVER&&_lgcInvLoaded){
     el.textContent='The server did not report a build number, so Dashboard.gs is older than this page. '
       +'Paste the matching Dashboard.gs and deploy a new version.';
     el.style.display='block';
@@ -6304,7 +6304,7 @@ function downloadFinancialPdf(){
   doc.setTextColor(255,255,255);
   doc.setFont('helvetica','bold');
   doc.setFontSize(14);
-  doc.text('CALO UMP — Financial Cost Report',14,9);
+  doc.text('CALO KMP — Financial Cost Report',14,9);
   doc.setFontSize(9);
   doc.setFont('helvetica','normal');
   doc.text('Period: '+d.periodLbl,14,16);
@@ -6387,7 +6387,7 @@ function downloadFinancialPdf(){
   doc.setFontSize(7);
   doc.setTextColor.apply(doc,grey);
   doc.setFont('helvetica','normal');
-  doc.text('CALO UMP Operations Dashboard',14,pgH-6);
+  doc.text('CALO KMP Operation Dashboard',14,pgH-6);
 
   doc.save('Financial_Cost_'+d.periodLbl.replace(/[^a-zA-Z0-9]/g,'_')+'.pdf');
 }

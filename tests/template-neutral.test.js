@@ -154,13 +154,47 @@ const EXPECTED = {
                              "CFG_CURRENCY_() + ' '", "':   ' + CFG_CURRENCY_()", "AED ' + _slkNum_(cur, 2)",
                              "'   ' + _slkDelta_(cur, prev);"]
 };
+// The template is branded KMP, so that difference is on every line carrying
+// the name. It is systematic, not a change in behaviour, so it is undone
+// before diffing rather than listed line by line.
+const unbrand = l => l.replace(/KMP/g, 'UMP')
+                      .replace('UMP Operation Dashboard',   'UMP Operations Dashboard')
+                      .replace('UMP OPERATION DASHBOARD',   'UMP OPERATIONS DASHBOARD')
+                      .replace('UMP Operation<br>Dashboard', 'UMP Operations<br>Dashboard');
+
 Object.keys(EXPECTED).forEach(f => {
-  const a = read(f).split('\n'), b = read('template/' + f).split('\n');
+  const a = read(f).split('\n'), b = read('template/' + f).split('\n').map(unbrand);
   const onlyIn = (x, y) => x.filter(l => l.trim() && y.indexOf(l) < 0);
   const changed = onlyIn(a, b).concat(onlyIn(b, a));
   const unexplained = changed.filter(l => !EXPECTED[f].some(m => l.includes(m)));
   t(f + ': differences are all accounted for', unexplained, []);
 });
+
+// ── the rename is complete and consistent ───────────────────
+FILES.forEach(f => {
+  const hits = read('template/' + f).split('\n')
+    .map((l, i) => l.includes('UMP') ? (i + 1) + ': ' + l.trim().slice(0, 60) : null)
+    .filter(Boolean);
+  t('no UMP left in ' + f, hits, []);
+});
+{
+  const ui = read('template/Index.html');
+  t('page title renamed', /<title>KMP Operation Dashboard<\/title>/.test(ui), true);
+  t('sidebar renamed',    ui.includes('KMP Operation<br>Dashboard'), true);
+  t('footer renamed',     ui.includes('KMP Operation Dashboard · All rights reserved'), true);
+
+  // Dashboard.gs and Index.html each carry the build label, and the page
+  // warns when they disagree. Renaming one variable and not the other would
+  // have made every load report a mismatch.
+  const srv  = read('template/Dashboard.gs').match(/var KMP_BUILD\s*=\s*'([^']+)'/);
+  const page = ui.match(/var KMP_BUILD_UI\s*=\s*'([^']+)'/);
+  t('server build label found', !!srv, true);
+  t('page build label found',   !!page, true);
+  t('build labels still match', srv && page && srv[1] === page[1], true);
+
+  // A Drive folder named for the market, so invoices do not land in UAE's.
+  t('invoice folder renamed', read('template/Dashboard.gs').includes("'KMP Logistics Invoices'"), true);
+}
 
 // Config.gs, CaloDeliveries.gs and Index.html differ on purpose and by a
 // lot, so they are checked by the assertions above rather than by diff.

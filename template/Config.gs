@@ -1,5 +1,5 @@
 // ============================================================
-// UMP OPERATIONS DASHBOARD — Config.gs
+// KMP OPERATION DASHBOARD — Config.gs
 // ============================================================
 //
 //  >>> THIS IS THE ONLY FILE YOUR MARKET NEEDS TO CHANGE. <<<
@@ -118,7 +118,7 @@ function SS_COMPLAINTS_()     { return _cfgId_('complaints'); }
 function SS_STAFF_()          { return _cfgId_('staff'); }
 function GID_DOD_COMPLAINT_() { return Number(_cfg_().src.dodGid || 0); }
 
-function CFG_MARKET_()   { return String(_cfg_().market || 'UMP'); }
+function CFG_MARKET_()   { return String(_cfg_().market || 'KMP'); }
 function CFG_KITCHEN_()  { return String(_cfg_().kitchen || ''); }
 // These two fall back to something deliberately wrong-looking rather than to
 // UAE's values. A dashboard quietly labelling Bahraini dinars as AED, and
@@ -153,7 +153,7 @@ function cfgSelfTest() {
   function fail(m) { out.push('  WRONG ' + m); ok = false; }
   function warn(m) { out.push('  note  ' + m); }
 
-  out.push('UMP config check — ' + new Date());
+  out.push('KMP config check — ' + new Date());
   out.push('');
 
   // --- identity -------------------------------------------------

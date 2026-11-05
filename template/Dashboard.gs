@@ -1,5 +1,5 @@
 // ============================================================
-// UMP OPERATIONS DASHBOARD — Code.gs  (v4 — multi-sheet staff)
+// KMP OPERATION DASHBOARD — Code.gs  (v4 — multi-sheet staff)
 // ============================================================
 
 function doGet(e) {
@@ -42,7 +42,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-11-05.dlv2';
+var KMP_BUILD    = '2026-11-05.dlv2';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 // A cache entry is capped at ~100 KB, and the page payloads outgrew that: the
@@ -597,7 +597,7 @@ function getFinancialData(ss) {
 }
 
 // ════════════════════════════════════════════════════════════
-// UMP COMPLAINTS
+// KMP COMPLAINTS
 // Counts: DOD Complaint sheet — Col A=Date, D(3)=FO, E(4)=Quality, F(5)=Health, G(6)=Spilled, H(7)=Cold, I(8)=Dispatch, J(9)=Logistics, K(10)=Calo Cafe
 // Rates:  MOM Complaints sheet — Col A=Month, N(13)=FO%, O(14)=Quality%, Q(16)=Spilled%, S(18)=Dispatch%, T(19)=Logistics%
 // Targets: MOM Complaints row 1, same columns
@@ -1954,7 +1954,7 @@ function parseLogisticsInvoiceText(text) {
 // filing the original, which is what grants the Drive scope.
 function _ocrPdfToText_(blob, name) {
   var token = ScriptApp.getOAuthToken();
-  var boundary = '-----UMPInvoiceBoundary' + Date.now();
+  var boundary = '-----KMPInvoiceBoundary' + Date.now();
   var meta = { name: 'ump-ocr-' + (name || 'invoice'), mimeType: 'application/vnd.google-apps.document' };
 
   var pre = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'
@@ -2005,8 +2005,8 @@ function _ocrDriveFileToText_(fileId, name) {
 
 // Keeps the original PDFs together so a saved figure can be traced back.
 function _umpInvoiceFolder_() {
-  var it = DriveApp.getFoldersByName('UMP Logistics Invoices');
-  return it.hasNext() ? it.next() : DriveApp.createFolder('UMP Logistics Invoices');
+  var it = DriveApp.getFoldersByName('KMP Logistics Invoices');
+  return it.hasNext() ? it.next() : DriveApp.createFolder('KMP Logistics Invoices');
 }
 
 // ── Called from the page: read an uploaded PDF into a draft ────
@@ -2050,7 +2050,7 @@ function _driveIdFromUrl_(url) {
 // "remaining" is above zero.
 function reparseAllStoredInvoices(max) {
   max = max || 3;
-  var res = { ok: true, build: UMP_BUILD, updated: [], skipped: [], failed: [], remaining: 0 };
+  var res = { ok: true, build: KMP_BUILD, updated: [], skipped: [], failed: [], remaining: 0 };
   try {
     var ss = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
@@ -2288,7 +2288,7 @@ function getLogisticsInvoiceData(force) {
       v.linesMismatch = (v.sumTotal > 0 && Math.abs(v.sumTotal - v.total) > 1);
       return v;
     });
-    var payload = { invoices: out, build: UMP_BUILD };
+    var payload = { invoices: out, build: KMP_BUILD };
     _cachePut_(_ck, payload);
     return payload;
   } catch (e) { return { invoices: [], error: e.message }; }
@@ -2980,13 +2980,13 @@ function sendPasswordReset(email) {
       var link    = appUrl + '?reset=' + token;
       MailApp.sendEmail({
         to: rowEmail,
-        subject: 'CALO UMP Dashboard — Password Reset',
+        subject: 'CALO KMP Dashboard — Password Reset',
         htmlBody:
           '<p>Hi,</p>' +
           '<p>Click the link below to reset your password. This link expires in 1 hour.</p>' +
           '<p><a href="' + link + '" style="background:#00C07F;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset My Password</a></p>' +
           '<p>If you did not request this, ignore this email.</p>' +
-          '<p>— CALO UMP Operations Dashboard</p>'
+          '<p>— CALO KMP Operation Dashboard</p>'
       });
       return {ok: true};
     }
@@ -3013,12 +3013,12 @@ function sendPasswordResetToAdmin(callerEmail, targetEmail) {
       var link   = appUrl + '?reset=' + token;
       MailApp.sendEmail({
         to: callerEmail.trim().toLowerCase(),
-        subject: 'CALO UMP — Password Reset Link for ' + targetEmail,
+        subject: 'CALO KMP — Password Reset Link for ' + targetEmail,
         htmlBody:
           '<p>Hi Super Admin,</p>' +
           '<p>Here is the password reset link for <strong>' + targetEmail + '</strong>. Share it with the user or use it to set their password. Expires in 1 hour.</p>' +
           '<p><a href="' + link + '" style="background:#00C07F;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset Password for ' + targetEmail + '</a></p>' +
-          '<p>— CALO UMP Operations Dashboard</p>'
+          '<p>— CALO KMP Operation Dashboard</p>'
       });
       return {ok: true};
     }

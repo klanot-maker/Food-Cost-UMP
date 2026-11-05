@@ -1,4 +1,14 @@
-# Setting up the Ops Dashboard for a new market
+# Setting up the KMP Operation Dashboard
+
+The dashboard is named **KMP Operation Dashboard** throughout — the page
+title, the sidebar, the footer, the password-reset emails, the exported PDF
+footer, and the Drive folder invoices are filed in.
+
+If this copy is for a market that is not KMP, change the name before you
+deploy: search all five files for `KMP` and replace it. Be careful with
+`KMP_BUILD` and `KMP_BUILD_UI` — they are a matched pair across
+`Dashboard.gs` and `Index.html`, and the page warns on every load if they
+disagree, so rename both or neither.
 
 > **This file is not part of the project. Do not paste it into Apps Script.**
 >
