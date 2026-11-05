@@ -32,6 +32,21 @@
 // number you trust; until then the sync refuses to run, because a delivery
 // count that quietly includes cancellations is worse than no count at all.
 //
+// HOW FAR AHEAD IT LOOKS
+// The window is whole weeks, Sunday to Saturday — last week, this week and
+// next week. On Thursday 5 November that is 25 October through 14 November:
+// last week re-checked, and every day from tomorrow to the end of next week.
+//
+// Forward days are counts, not estimates. The deliveries already exist —
+// subscriptions renewed, meals chosen, addresses attached — they simply have
+// not been driven anywhere yet, which is why the Calo dashboard can show
+// 3,807 for tomorrow. The further out the day, the fewer exist so far, so the
+// number climbs as the week fills. Re-reading it every morning is the point.
+//
+// A forecast must never erase a plan. A FUTURE day answering 0 has not been
+// generated yet rather than been cancelled, so it is left alone and said so.
+// A past day answering 0 is written, because there zero is a fact.
+//
 // ── SETTINGS (Project Settings → Script Properties) ─────────
 //   CALO_API_KEY      required. Sent as X-Api-Key. Needs kitchen:stats:read.
 //   CALO_API_BASE     optional. Defaults to the gateway below.
@@ -47,6 +62,11 @@
 //   3. caloPreviewSync()                  what would change. Writes nothing.
 //   4. caloSyncDeliveries()               writes it
 //   5. caloInstallDailySync()             every morning
+//
+// Both sync calls take whole WEEKS, and both default to (1, 1) — last week,
+// this week, next week. caloSyncDeliveries(0, 2) would be this week plus the
+// two ahead. They used to take days, so a stale caloSyncDeliveries(7, 2) is
+// refused rather than read as seven weeks.
 //
 // Nothing here touches any tab other than DELIVERIES.
 // ============================================================
@@ -120,6 +140,26 @@ function _caloShiftDays_(ymd, n) {
   var q = function(x) { return (x < 10 ? '0' : '') + x; };
   return d.getFullYear() + '-' + q(d.getMonth()+1) + '-' + q(d.getDate());
 }
+
+// ── weeks run Sunday → Saturday ─────────────────────────────
+// Calo's operating week starts on Sunday, so every window below is anchored
+// to one. Dates stay as yyyy-mm-dd strings throughout: that sorts and
+// compares correctly as plain text, which avoids a Date object quietly
+// shifting a day across a timezone when nobody is watching.
+
+var _CALO_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** 0 = Sunday … 6 = Saturday. */
+function _caloDow_(ymd) {
+  var p = ymd.split('-');
+  return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])).getDay();
+}
+
+/** The Sunday that begins the week containing this date. */
+function _caloWeekStart_(ymd) { return _caloShiftDays_(ymd, -_caloDow_(ymd)); }
+
+/** The Saturday that ends the week containing this date. */
+function _caloWeekEnd_(ymd) { return _caloShiftDays_(ymd, 6 - _caloDow_(ymd)); }
 
 
 // ── building the request ────────────────────────────────────
@@ -300,6 +340,11 @@ function caloDiagnose() {
  * show how the day breaks down, so that if nothing matches exactly we can
  * see what the gap is made of instead of guessing again.
  */
+// Read off the Calo dashboard on 2026-11-05. Note that 11-06 was a forward
+// day when it was recorded: 3,807 was how many deliveries existed for it at
+// that moment, not the figure it finally settled at. If this filter ever has
+// to be re-proved, replace these with six SETTLED days — a day still filling
+// up will make a correct filter look wrong.
 var CALO_TRUTH = {
   '2026-11-01': 2130,
   '2026-11-02': 5570,
@@ -506,18 +551,61 @@ function _caloSheetIndex_() {
 
 // ── 3 & 4. PREVIEW AND SYNC ─────────────────────────────────
 
+/**
+ * How many weeks either side may be asked for.
+ *
+ * Four is already two months end to end, which is far more than a delivery
+ * count is ever re-read over. The limit exists to catch the old habit, not
+ * to ration anything: this used to count DAYS, and caloSyncDeliveries(7, 2)
+ * still reads as a perfectly reasonable call. Seven WEEKS back would be
+ * forty-nine days of API calls rewriting a sheet nobody meant to touch, so
+ * seven lands above the line and is refused with an explanation.
+ */
+var _CALO_MAX_WEEKS = 4;
+
+/** Reads a weeks argument, or explains why it will not. */
+function _caloWeeksArg_(v, dflt, name) {
+  if (v === null || v === undefined || v === '') return dflt;
+  var n = Number(v);
+  if (isNaN(n) || n < 0) {
+    throw new Error(name + ' must be a whole number of WEEKS, 0 or more. ' +
+                    'caloSyncDeliveries() with no arguments is the normal call.');
+  }
+  if (n > _CALO_MAX_WEEKS) {
+    throw new Error(name + ' is counted in WEEKS now, not days — ' + n + ' would be ' +
+                    (n * 7) + ' days. Try ' + Math.max(1, Math.round(n / 7)) + '.');
+  }
+  return Math.floor(n);
+}
+
+/**
+ * Every date in the window, Sunday-aligned at both ends.
+ *
+ * weeksBack 1, weeksForward 1 → the Sunday that began last week through the
+ * Saturday that ends next week. Twenty-one days, always; the edges never
+ * fall mid-week, whichever day the sync happens to run on.
+ */
+function _caloDayList_(weeksBack, weeksForward) {
+  var today = _caloToday_();
+  var from  = _caloWeekStart_(_caloShiftDays_(today, -7 * weeksBack));
+  var to    = _caloWeekEnd_(_caloShiftDays_(today,   7 * weeksForward));
+  var days = [], d = from, guard = 0;
+  while (d <= to && guard++ < 400) {        // string compare: yyyy-mm-dd sorts
+    days.push(d);
+    d = _caloShiftDays_(d, 1);
+  }
+  return days;
+}
+
 /** Shows exactly what a sync would change. Writes nothing. */
-function caloPreviewSync(daysBack, daysForward) { return _caloSync_(daysBack, daysForward, true); }
+function caloPreviewSync(weeksBack, weeksForward) { return _caloSync_(weeksBack, weeksForward, true); }
 
 /** Writes the API's counts into the DELIVERIES tab. Touches no other tab. */
-function caloSyncDeliveries(daysBack, daysForward) { return _caloSync_(daysBack, daysForward, false); }
+function caloSyncDeliveries(weeksBack, weeksForward) { return _caloSync_(weeksBack, weeksForward, false); }
 
-function _caloSync_(daysBack, daysForward, previewOnly) {
-  daysBack    = (daysBack    === 0 || daysBack)    ? Number(daysBack)    : 7;
-  // Two days ahead by default, matching Today's DPD and Tomorrow's DPD on
-  // the Calo dashboard. Those days are not guesswork: the deliveries exist
-  // and are counted, they simply have not been dispatched yet.
-  daysForward = (daysForward === 0 || daysForward) ? Number(daysForward) : 2;
+function _caloSync_(weeksBack, weeksForward, previewOnly) {
+  weeksBack    = _caloWeeksArg_(weeksBack,    1, 'weeksBack');
+  weeksForward = _caloWeeksArg_(weeksForward, 1, 'weeksForward');
   var props = PropertiesService.getScriptProperties();
   var style = props.getProperty('CALO_QS_STYLE');
   var extra = _caloExtraFilter_();
@@ -552,61 +640,82 @@ function _caloSync_(daysBack, daysForward, previewOnly) {
 
   var idx   = _caloSheetIndex_();
   var today = _caloToday_();
+  var days  = _caloDayList_(weeksBack, weeksForward);
 
   say('Kitchen: ' + _caloKitchen_() + '    Counting: ' + JSON.stringify(extra));
+  say('Window:  ' + days[0] + ' (Sun) → ' + days[days.length - 1] + ' (Sat)   ' +
+      days.length + ' days, ' + (weeksBack + weeksForward + 1) + ' whole weeks');
+  say('Today:   ' + today + ' (' + _CALO_DOW[_caloDow_(today)] + ')   ' +
+      'anything after this is a forecast and will be revised daily');
   say('');
-  say('   date         sheet now      API    action');
+  say('      date            sheet now  API     action');
 
-  var written = 0, skipped = 0, failed = 0;
+  var written = 0, skipped = 0, failed = 0, held = 0;
+  var thisWeek = '';
 
-  // Backwards from today, then forward by daysForward. The forward days
-  // replace the DPD board figures that were typed in by hand, which is the
-  // point: the API reports the same deliveries the board does, without
-  // anyone retyping them.
-  for (var i = daysBack; i >= -daysForward; i--) {
-    var ds   = _caloShiftDays_(today, -i);
-    var cell = idx.cells[ds];
-    var now  = idx.values.hasOwnProperty(ds) ? idx.values[ds] : null;
-
-    if (!cell) {
-      say('   ' + ds + '   ' + _caloPadRight_('—', 14) + _caloPadRight_('—', 8) +
-          'no row for this date in the tab');
-      skipped++;
-      continue;
+  days.forEach(function(ds) {
+    // A heading per week, so twenty-one rows read as three weeks rather than
+    // as a wall. The tag says which side of today the week falls on.
+    var wkStart = _caloWeekStart_(ds);
+    if (wkStart !== thisWeek) {
+      thisWeek = wkStart;
+      var wkEnd = _caloWeekEnd_(ds);
+      var tag   = (wkEnd   < today) ? 'last week — re-checked'
+                : (wkStart > today) ? 'NEXT WEEK — forecast'
+                :                     'this week';
+      say('');
+      say('   ── ' + wkStart + ' Sun → ' + wkEnd + ' Sat    ' + tag);
     }
+
+    var isFuture = ds > today;
+    var cell     = idx.cells[ds];
+    var now      = idx.values.hasOwnProperty(ds) ? idx.values[ds] : null;
+
+    function row(api, action) {
+      say('      ' + _caloPadRight_(ds + ' ' + _CALO_DOW[_caloDow_(ds)], 16) +
+          _caloPadRight_(now == null ? '(blank)' : now, 11) +
+          _caloPadRight_(api, 8) + action);
+    }
+
+    if (!cell) { row('—', 'no row for this date in the tab'); skipped++; return; }
 
     var c = _caloCountFor_(ds, extra);
-    if (!c.ok) {
-      say('   ' + ds + '   ' + _caloPadRight_(now == null ? '(blank)' : now, 14) +
-          _caloPadRight_('—', 8) + 'FAILED: ' + c.why);
-      failed++;
-      continue;
-    }
-    if (now === c.count) {
-      say('   ' + ds + '   ' + _caloPadRight_(now, 14) + _caloPadRight_(c.count, 8) + 'already correct');
-      skipped++;
-      continue;
+    if (!c.ok) { row('—', 'FAILED: ' + c.why); failed++; return; }
+
+    // The one case where the API is not yet worth believing. A future day
+    // with no rows has not been generated, not been cancelled — writing 0
+    // over a planned figure would destroy real information to record an
+    // absence. Past days are different: there 0 is an answer.
+    if (isFuture && c.count === 0) {
+      row('0', 'not generated yet — left alone');
+      held++;
+      return;
     }
 
+    if (now === c.count) { row(c.count, 'already correct'); skipped++; return; }
+
+    var note = isFuture ? ' (forecast)' : '';
     if (previewOnly) {
-      say('   ' + ds + '   ' + _caloPadRight_(now == null ? '(blank)' : now, 14) +
-          _caloPadRight_(c.count, 8) + 'would write');
+      row(c.count, 'would write' + note);
     } else {
       idx.sheet.getRange(cell.row, cell.col).setValue(c.count);
-      say('   ' + ds + '   ' + _caloPadRight_(now == null ? '(blank)' : now, 14) +
-          _caloPadRight_(c.count, 8) + 'written');
+      row(c.count, 'written' + note);
       written++;
     }
-  }
+  });
 
   say('');
   if (previewOnly) {
     say('Nothing was changed. Run caloSyncDeliveries() to apply this.');
   } else {
-    say(written + ' written, ' + skipped + ' unchanged, ' + failed + ' failed.');
+    say(written + ' written, ' + skipped + ' unchanged, ' + held +
+        ' held back, ' + failed + ' failed.');
     // The dashboard keys its cache on the workbook's last-modified time, so
     // a write here is picked up on its own. No redeploy, no Refresh.
     if (written) say('The dashboard picks these up within about a minute.');
+    if (held)    say(held + ' future day(s) had no deliveries generated yet, so whatever ' +
+                     'was already in the sheet was left in place. They fill in as the ' +
+                     'week approaches.');
     if (failed)  say('Some days failed. Run caloDiagnose() — the API may have changed, ' +
                      'or the key may have lost its scope.');
   }
@@ -622,9 +731,12 @@ function _caloSync_(daysBack, daysForward, previewOnly) {
 /**
  * Runs the sync every morning at 06:00 in the script's timezone.
  *
- * It re-syncs the whole of the last week rather than just yesterday, so a
- * day that was wrong — the API down, or deliveries settling after the run —
- * is corrected on the next pass instead of staying wrong for good.
+ * Each run covers last week, this week and next week. Re-reading the past
+ * matters because a day that was wrong — the API down, or deliveries still
+ * settling when the run happened — is corrected on the next pass instead of
+ * staying wrong for good. Re-reading the future matters more: next week's
+ * numbers are only as complete as the orders placed so far, so every morning
+ * revises them upwards until the day arrives and they stop moving.
  */
 function caloInstallDailySync() {
   if (!_caloExtraFilter_()) {
@@ -634,8 +746,12 @@ function caloInstallDailySync() {
   }
   caloRemoveDailySync();
   ScriptApp.newTrigger('caloDailySyncRun').timeBased().atHour(6).everyDays(1).create();
+  var today = _caloToday_();
   var msg = 'Daily sync installed: caloDailySyncRun, about 06:00 ' +
-            Session.getScriptTimeZone() + ', re-checking the last 7 days and the next 2 each run.';
+            Session.getScriptTimeZone() + '. Each run covers ' +
+            _caloWeekStart_(_caloShiftDays_(today, -7)) + ' Sun → ' +
+            _caloWeekEnd_(_caloShiftDays_(today, 7)) + ' Sat — last week, this ' +
+            'week and next week, re-read in full every morning.';
   Logger.log(msg);
   return msg;
 }
@@ -655,4 +771,4 @@ function caloRemoveDailySync() {
  * this takes no argument and passes its own — calling caloSyncDeliveries
  * straight from a trigger would read that event as daysBack.
  */
-function caloDailySyncRun() { return caloSyncDeliveries(7, 2); }
+function caloDailySyncRun() { return caloSyncDeliveries(1, 1); }
