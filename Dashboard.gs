@@ -42,7 +42,7 @@ var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-11-05.dlv';
+var UMP_BUILD    = '2026-11-05.dlv2';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 // A cache entry is capped at ~100 KB, and the page payloads outgrew that: the
@@ -1212,46 +1212,43 @@ function getCapacityData(ss) {
 //   Col C = dates for Feb, Col D = deliveries for Feb  …etc.
 // Row 1 may contain month/year header labels — skipped.
 // ════════════════════════════════════════════════════════════
-// Daily delivery actuals.
+// Daily delivery figures.
 //
-// Two tabs can hold these, and until now only the wrong one was read.
+// DELIVERIES is the maintained tab and the one that wins. Its layout is not
+// obvious: year blocks are stacked VERTICALLY, each block twelve month
+// column-pairs wide (even column a date, the next its count) and about
+// thirty-two rows tall. UAE's blocks run 2022, 2023, 2024, 2025, 2026 down
+// the sheet, so reading only the first rows shows 2022 and hides everything
+// after it. The reader walks every row, which is why it finds all of them.
 //
-//   DISTRICT DELIVERIES — one row per day, districts across, a Total column
-//                         that is a =SUM() of them. Maintained daily. This is
-//                         where the current figures actually are.
-//   DELIVERIES          — an older year-block archive: each even column a
-//                         date, the next its count, one pair per month.
-//                         UAE's stops at December 2022.
-//
-// Reading only the archive meant every lookup for a recent date missed, and
-// three features returned 0 without reporting anything wrong: the Operation
-// Overview delivery counts, logistics cost per delivery, and Forecast vs
-// Actuals. The district tab is now read first, and the archive fills in any
-// date it does not carry — so markets that still keep figures the old way
-// keep working, and manual entries written by saveDeliveryWithForecast are
-// still picked up for dates the district tab has not reached.
+// DISTRICT DELIVERIES holds the same days broken out by emirate, with a
+// Total column that is a =SUM() of them. It is read only to fill dates
+// DELIVERIES does not carry. The two tabs do not always agree — for
+// 1–3 Nov 2026 they differ by up to 400 — so which one wins has to be a
+// decision rather than an accident, and DELIVERIES is what the operation
+// maintains and what the Forecast page writes back to.
 function getDeliveriesData(ss) {
   try {
     ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
 
-    var district = _dlvFromDistrictTab_(ss);
     var legacy   = _dlvFromLegacyTab_(ss);
+    var district = _dlvFromDistrictTab_(ss);
 
     var byDate = {};
-    // Legacy first so the district tab, being the maintained source, wins.
-    legacy.forEach(function(r)   { byDate[r.dateStr] = r.actual; });
+    // District first, so DELIVERIES overwrites it wherever both have the day.
     district.forEach(function(r) { byDate[r.dateStr] = r.actual; });
+    legacy.forEach(function(r)   { byDate[r.dateStr] = r.actual; });
 
     var records = Object.keys(byDate).sort().map(function(ds) {
       return { dateStr: ds, actual: byDate[ds] };
     });
 
     return {
-      records:  records,
-      // Named so a market that shows no deliveries can tell at a glance
-      // whether its district tab was found, rather than guessing.
-      source:   district.length ? 'DISTRICT DELIVERIES' : (legacy.length ? 'DELIVERIES' : 'none'),
-      counts:   { district: district.length, legacy: legacy.length }
+      records: records,
+      // Counted so a market showing no deliveries can see which tab was
+      // found, rather than guessing at an empty page.
+      counts:  { deliveries: legacy.length, district: district.length,
+                 filledFromDistrict: records.length - legacy.length }
     };
   } catch(e) {
     return { error: e.message, records: [] };
@@ -1305,7 +1302,11 @@ function _dlvFromDistrictTab_(ss) {
   return out;
 }
 
-/** The older archive: each even column a date, the next its count. */
+/**
+ * DELIVERIES: year blocks stacked down the sheet, each twelve month
+ * column-pairs wide — even column a date, the next its count. Every row is
+ * walked, so all year blocks are picked up, not just the topmost one.
+ */
 function _dlvFromLegacyTab_(ss) {
   var sheet = ss.getSheetByName('DELIVERIES');
   if (!sheet) return [];

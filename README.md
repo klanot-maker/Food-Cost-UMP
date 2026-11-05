@@ -65,19 +65,28 @@ looked up again. Worst case about a minute.
 Payloads over ~90 KB are split across numbered cache chunks; the head is
 written last, so a half-written set can never be read back.
 
-## Deliveries: two tabs, one of them an archive
+## Deliveries: two tabs that disagree
 
-`DISTRICT DELIVERIES` holds the current figures — one row per day, districts
-across, a `Total` column that sums them. It is maintained daily.
+`DELIVERIES` is the maintained tab and the one that wins.
 
-`DELIVERIES` is an older year-block archive: each even column a date, the next
-its count, one pair per month. **UAE's stops at December 2022.**
+**Its layout is easy to misread.** Year blocks are stacked *vertically*, each
+block twelve month column-pairs wide (even column a date, the next its count)
+and about thirty-two rows tall. UAE's run 2022, 2023, 2024, 2025, 2026 down
+the sheet — rows 1, 34, 67, 100 and 133. Reading only the top rows shows 2022
+and hides everything after it. `_dlvFromLegacyTab_` walks every row.
 
-Until November 2026 the code read only the archive, so every lookup for a
-recent date missed and three features silently returned 0: the Operation
-Overview delivery counts, logistics cost per delivery, and Forecast vs
-Actuals. `getDeliveriesData` now reads the district tab first and uses the
-archive only for dates the district tab does not carry.
+`DISTRICT DELIVERIES` holds the same days broken out by emirate, with a
+`Total` column that is a `=SUM()` of them. It is read only to fill dates
+`DELIVERIES` does not carry.
+
+**The two do not always agree.** For 1–3 Nov 2026 they differ by up to 400
+(e.g. 2 Nov: 5567 vs 5603). Nobody should assume they are interchangeable;
+`DELIVERIES` wins because it is what the operation maintains and what the
+Forecast page writes back to.
+
+Note that `DELIVERIES` carries figures for dates in the future — 6 and 7 Nov
+were populated on 5 Nov — so it holds planned deliveries, not only settled
+actuals.
 
 ## Live delivery stats from the Calo API — not available
 
