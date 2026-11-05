@@ -29,17 +29,20 @@ function doGet(e) {
 // Each opens only the spreadsheet(s) it needs — no redundant opens.
 // CacheService keeps each section fresh for 30 s.
 
-var _CACHE_CAP   = 'ump_cap_v1';
+// Bumped to v2: deliveries now come from DISTRICT DELIVERIES, so a payload
+// cached under the old key holds the archive-only series and must be dropped
+// rather than served for the rest of its five minutes.
+var _CACHE_CAP   = 'ump_cap_v2';
 var _CACHE_FIN   = 'ump_fin_v1';
 var _CACHE_STAFF = 'ump_staff_v1';
 // Bumped to v2: the ops payload now carries logistics cost fields, so any
 // payload cached under the old key has the wrong shape and must be dropped.
-var _CACHE_OPS   = 'ump_ops_v2';
+var _CACHE_OPS   = 'ump_ops_v3';
 var _CACHE_INV   = 'ump_loginv_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
-var UMP_BUILD    = '2026-11-05.cfg';
+var UMP_BUILD    = '2026-11-05.dlv';
 var _CACHE_TTL   = 300; // seconds (5 min)
 
 // A cache entry is capped at ~100 KB, and the page payloads outgrew that: the
@@ -1209,38 +1212,116 @@ function getCapacityData(ss) {
 //   Col C = dates for Feb, Col D = deliveries for Feb  …etc.
 // Row 1 may contain month/year header labels — skipped.
 // ════════════════════════════════════════════════════════════
+// Daily delivery actuals.
+//
+// Two tabs can hold these, and until now only the wrong one was read.
+//
+//   DISTRICT DELIVERIES — one row per day, districts across, a Total column
+//                         that is a =SUM() of them. Maintained daily. This is
+//                         where the current figures actually are.
+//   DELIVERIES          — an older year-block archive: each even column a
+//                         date, the next its count, one pair per month.
+//                         UAE's stops at December 2022.
+//
+// Reading only the archive meant every lookup for a recent date missed, and
+// three features returned 0 without reporting anything wrong: the Operation
+// Overview delivery counts, logistics cost per delivery, and Forecast vs
+// Actuals. The district tab is now read first, and the archive fills in any
+// date it does not carry — so markets that still keep figures the old way
+// keep working, and manual entries written by saveDeliveryWithForecast are
+// still picked up for dates the district tab has not reached.
 function getDeliveriesData(ss) {
   try {
     ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
-    var sheet = ss.getSheetByName('DELIVERIES');
-    if (!sheet) return { records: [] };
 
-    var all = sheet.getDataRange().getValues();
-    var records = [];
-    var seen = {};
+    var district = _dlvFromDistrictTab_(ss);
+    var legacy   = _dlvFromLegacyTab_(ss);
 
-    // Each even column (0,2,4,…) = date; next column = delivery count
-    for (var r = 1; r < all.length; r++) {
-      var row = all[r];
-      for (var c = 0; c + 1 < row.length; c += 2) {
-        var dv = row[c], cv = row[c + 1];
-        if (!dv) continue;
-        var ds = null;
-        if (dv instanceof Date && !isNaN(dv.getTime())) {
-          ds = dv.getFullYear()+'-'+pad2(dv.getMonth()+1)+'-'+pad2(dv.getDate());
-        } else {
-          var s2 = String(dv).trim();
-          if (/^\d{4}-\d{2}-\d{2}/.test(s2)) ds = s2.substring(0,10);
-        }
-        if (!ds || seen[ds]) continue;
-        var n2 = safeNum(cv);
-        if (n2 > 0) { records.push({ dateStr: ds, actual: n2 }); seen[ds] = true; }
-      }
-    }
-    return { records: records };
+    var byDate = {};
+    // Legacy first so the district tab, being the maintained source, wins.
+    legacy.forEach(function(r)   { byDate[r.dateStr] = r.actual; });
+    district.forEach(function(r) { byDate[r.dateStr] = r.actual; });
+
+    var records = Object.keys(byDate).sort().map(function(ds) {
+      return { dateStr: ds, actual: byDate[ds] };
+    });
+
+    return {
+      records:  records,
+      // Named so a market that shows no deliveries can tell at a glance
+      // whether its district tab was found, rather than guessing.
+      source:   district.length ? 'DISTRICT DELIVERIES' : (legacy.length ? 'DELIVERIES' : 'none'),
+      counts:   { district: district.length, legacy: legacy.length }
+    };
   } catch(e) {
-    return { error: e.message };
+    return { error: e.message, records: [] };
   }
+}
+
+/** 'YYYY-MM-DD' from a real date cell, an ISO string, or ordinary date text. */
+function _dlvYmd_(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return v.getFullYear()+'-'+pad2(v.getMonth()+1)+'-'+pad2(v.getDate());
+  }
+  // A bare number is refused: new Date(45928) is 1970, not a spreadsheet
+  // serial, and one stray numeric cell in a date column would otherwise
+  // invent a record nobody could trace.
+  if (typeof v === 'number') return null;
+  var s = String(v === null || v === undefined ? '' : v).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0, 10);
+  var d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+  }
+  return null;
+}
+
+/** Daily totals from DISTRICT DELIVERIES: column A the date, first 'Total'. */
+function _dlvFromDistrictTab_(ss) {
+  var sheet = ss.getSheetByName('DISTRICT DELIVERIES');
+  if (!sheet) return [];
+  var all = sheet.getDataRange().getValues();
+  if (all.length < 2) return [];
+
+  // The tab carries a second, monthly summary block further right with a
+  // 'Total' header of its own, so only the FIRST one is the daily total.
+  var hdr = (all[0] || []).map(function(h) { return String(h||'').trim().toLowerCase(); });
+  var totalCol = -1;
+  for (var c = 1; c < hdr.length; c++) {
+    if (hdr[c] === 'total') { totalCol = c; break; }
+  }
+  if (totalCol < 0) return [];
+
+  var out = [], seen = {};
+  for (var r = 1; r < all.length; r++) {
+    var ds = _dlvYmd_(all[r][0]);
+    if (!ds || seen[ds]) continue;
+    // Rows for days not yet filled sum to 0; skipping them keeps a future
+    // date out of the series rather than recording it as a zero-delivery day.
+    var n = safeNum(all[r][totalCol]);
+    if (n > 0) { out.push({ dateStr: ds, actual: n }); seen[ds] = true; }
+  }
+  return out;
+}
+
+/** The older archive: each even column a date, the next its count. */
+function _dlvFromLegacyTab_(ss) {
+  var sheet = ss.getSheetByName('DELIVERIES');
+  if (!sheet) return [];
+  var all = sheet.getDataRange().getValues();
+  var out = [], seen = {};
+  for (var r = 1; r < all.length; r++) {
+    var row = all[r];
+    for (var c = 0; c + 1 < row.length; c += 2) {
+      if (!row[c]) continue;
+      var ds = _dlvYmd_(row[c]);
+      if (!ds || seen[ds]) continue;
+      var n = safeNum(row[c + 1]);
+      if (n > 0) { out.push({ dateStr: ds, actual: n }); seen[ds] = true; }
+    }
+  }
+  return out;
 }
 
 // ════════════════════════════════════════════════════════════
