@@ -4,7 +4,14 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>UMP Operations Dashboard</title>
-<script>var _RESET_TOKEN='<?= resetToken ?>';</script>
+<script>
+var _RESET_TOKEN='<?= resetToken ?>';
+// Market facts from Config.gs, handed over by doGet before anything renders,
+// so currency labels are correct on the first paint rather than after a fetch.
+var UICFG = <?!= uiCfg ?>;
+var CUR = (UICFG && UICFG.currency) || 'AED';   // currency label on every figure
+var FXU = (UICFG && UICFG.fxToUsd)  || 3.67;    // local units per 1 USD
+</script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
@@ -1215,13 +1222,13 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
       <div class="two-col">
         <div class="tbl-card">
           <div class="tbl-hdr"><div class="tbl-title">Total wastage cost</div></div>
-          <table class="dtbl"><thead><tr><th>Category</th><th>AED</th><th>MoM Growth</th><th>USD</th></tr></thead>
+          <table class="dtbl"><thead><tr><th>Category</th><th><?= cur ?></th><th>MoM Growth</th><th>USD</th></tr></thead>
           <tbody id="wBody"></tbody></table>
           <div class="tbl-foot"><span class="ftot" id="wTot">—</span><span class="fcnt" id="wCnt">—</span></div>
         </div>
         <div class="tbl-card">
           <div class="tbl-hdr"><div class="tbl-title">Other cost breakdown</div></div>
-          <table class="dtbl"><thead><tr><th>Category</th><th>AED</th><th>MoM Growth</th><th>USD</th></tr></thead>
+          <table class="dtbl"><thead><tr><th>Category</th><th><?= cur ?></th><th>MoM Growth</th><th>USD</th></tr></thead>
           <tbody id="oBody"></tbody></table>
           <div class="tbl-foot"><span class="ftot" id="oTot">—</span><span class="fcnt" id="oCnt">—</span></div>
         </div>
@@ -1614,16 +1621,16 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
             <input id="lgcTarget" class="lgc-input" type="number" step="0.01" min="0" value="8.50" style="width:110px;" oninput="_lgcSave();renderLogisticsCost()"/>
           </div>
           <div>
-            <div class="lgc-ctl-lbl">Fuel · AED / vehicle / day</div>
+            <div class="lgc-ctl-lbl">Fuel · <?= cur ?> / vehicle / day</div>
             <input id="lgcFuelRate" class="lgc-input" type="number" step="1" min="0" value="200" style="width:110px;" oninput="_lgcSave();renderLogisticsCost()"/>
           </div>
           <div>
-            <div class="lgc-ctl-lbl">Salik · AED / vehicle / day</div>
+            <div class="lgc-ctl-lbl">Salik · <?= cur ?> / vehicle / day</div>
             <input id="lgcSalikRate" class="lgc-input" type="number" step="0.5" min="0" value="8" style="width:105px;" oninput="_lgcSave();renderLogisticsCost()"/>
           </div>
           <div class="lgc-note" style="flex:1;min-width:250px;">
             Fixed cost is the actual Van, Truck and Helper spend from columns K–M.
-            Variable cost is assumed: <b id="lgcRateEcho">208</b> AED per vehicle per day
+            Variable cost is assumed: <b id="lgcRateEcho">208</b> <?= cur ?> per vehicle per day
             (VAT included) across Vans + 3 Ton Trucks. Months with a saved invoice use the invoice instead.
             <div id="lgcCovHint" style="margin-top:5px;"></div>
           </div>
@@ -2365,7 +2372,7 @@ function readInvoicePdf(){
 }
 
 function startBlankInvoice(){
-  _showInvoiceDraft({supplier:'',invoiceNo:'',invoiceDate:'',ym:'',currency:'AED',
+  _showInvoiceDraft({supplier:'',invoiceNo:'',invoiceDate:'',ym:'',currency:CUR,
                      items:[{description:'',taxable:null,vat:null,total:null}],warnings:[]});
 }
 
@@ -2377,7 +2384,7 @@ function _showInvoiceDraft(d){
   document.getElementById('lgcInvSupplier').value=d.supplier||'';
   document.getElementById('lgcInvNo').value=d.invoiceNo||'';
   document.getElementById('lgcInvDate').value=d.invoiceDate||'';
-  document.getElementById('lgcInvCurrency').value=d.currency||'AED';
+  document.getElementById('lgcInvCurrency').value=d.currency||CUR;
 
   // Month options: whatever the selector offers, plus the invoice's own month.
   var sel=document.getElementById('lgcInvYm');
@@ -2512,7 +2519,7 @@ function _lgcCollectInvoice(replace){
     invoiceNo:document.getElementById('lgcInvNo').value.trim(),
     invoiceDate:document.getElementById('lgcInvDate').value.trim(),
     ym:document.getElementById('lgcInvYm').value,
-    currency:document.getElementById('lgcInvCurrency').value.trim()||'AED',
+    currency:document.getElementById('lgcInvCurrency').value.trim()||CUR,
     items:items, fileUrl:_lgcInvFileUrl,
     replace:(!!replace)||_lgcEditMode, replaceId:_lgcEditMode?_lgcEditingId:null,
     invoiceNet:parseFloat(document.getElementById('lgcInvHdrNet').value),
@@ -3543,7 +3550,7 @@ var FIN_FALLBACK = {
     revenue:    {'Jan 2026':6082733.80,'Feb 2026':6616142.70,'Mar 2026':3681408.37,'Apr 2026':5977470.03,'May 2026':7940798.70},
     deliveries: {'Jan 2026':106256,    'Feb 2026':84096,      'Mar 2026':59664,      'Apr 2026':105427,     'May 2026':102065},
     dpd:        {'Jan 2026':4830,      'Feb 2026':4205,       'Mar 2026':2712,       'Apr 2026':4792,       'May 2026':4860},
-    // USD revenue (from sheet row 3); fallback computed at 3.67 if sheet value absent
+    // USD revenue (from sheet row 3); fallback computed at the market FX rate (FXU)
     revenueUsd:      {'Jan 2026':1657420, 'Feb 2026':1802764, 'Mar 2026':1003108, 'Apr 2026':1628520, 'May 2026':2163705},
     // Delivery growth % from sheet row 6
     deliveriesGrowth:{'Jan 2026':null,    'Feb 2026':-20.9,   'Mar 2026':-29.0,   'Apr 2026':76.7,    'May 2026':-3.1},
@@ -3687,9 +3694,9 @@ function renderFinancial(){
   var deliveries=activeMos.reduce(function(s,mo){return s+((fin.kpis.deliveries||{})[mo]||0);},0);
   var dpd       =activeMos.length?Math.round(activeMos.reduce(function(s,mo){return s+((fin.kpis.dpd||{})[mo]||0);},0)/activeMos.length):0;
 
-  // USD Revenue: from sheet row 3 if available, else compute at 3.67
+  // USD Revenue: from sheet row 3 if available, else compute at the market FX rate
   var revenueUsdSum=activeMos.reduce(function(s,mo){return s+((fin.kpis.revenueUsd||{})[mo]||0);},0);
-  if(!revenueUsdSum) revenueUsdSum=revenue/3.67;
+  if(!revenueUsdSum) revenueUsdSum=revenue/FXU;
 
   var tw=wData.reduce(function(s,r){return s+r.aed;},0);
   var to=oData.reduce(function(s,r){return s+r.aed;},0);
@@ -3699,7 +3706,7 @@ function renderFinancial(){
                 activeMos.length>1?activeMos[0]+' – '+activeMos[activeMos.length-1]:'Selected period';
 
   // USD formatter
-  var fmtUsd=function(aed){return '$'+Math.round(aed/3.67).toLocaleString();};
+  var fmtUsd=function(aed){return '$'+Math.round(aed/FXU).toLocaleString();};
   var fmtUsdDirect=function(v){return '$'+Math.round(v).toLocaleString();};
 
   // Delivery growth — try row 6 first, else calculate from previous month
@@ -3731,7 +3738,7 @@ function renderFinancial(){
 
   document.getElementById('finKpiRow').innerHTML=
     '<div class="kpi" onclick="showFinDrilldown(\'revenue\',\'Revenue\')"><div class="kpi-lbl">Revenue</div>'
-      +'<div class="kpi-main"><span class="kpi-num">AED '+Math.round(revenue).toLocaleString()+'</span></div>'
+      +'<div class="kpi-main"><span class="kpi-num">'+CUR+' '+Math.round(revenue).toLocaleString()+'</span></div>'
       +'<div class="kpi-meta" style="font-weight:600;color:var(--br)">'+fmtUsdDirect(revenueUsdSum)+'</div>'
       +'<div class="kpi-meta">'+periodLbl+'</div></div>'+
     '<div class="kpi" onclick="showFinDrilldown(\'deliveries\',\'Total Deliveries\')"><div class="kpi-lbl">Total Deliveries</div>'
@@ -3741,11 +3748,11 @@ function renderFinancial(){
       +'<div class="kpi-main"><span class="kpi-num">'+dpd.toLocaleString()+'</span></div>'
       +'<div class="kpi-meta">Daily deliveries per day</div></div>'+
     '<div class="kpi red-k" onclick="showFinDrilldown(\'wastage\',\'Total Wastage\')"><div class="kpi-lbl">Total Wastage</div>'
-      +'<div class="kpi-main"><span class="kpi-num red">AED '+Math.round(tw).toLocaleString()+'</span><span class="kpi-pct over">'+wp+'% rev</span></div>'
+      +'<div class="kpi-main"><span class="kpi-num red">'+CUR+' '+Math.round(tw).toLocaleString()+'</span><span class="kpi-pct over">'+wp+'% rev</span></div>'
       +'<div class="kpi-meta" style="font-weight:600;color:var(--red)">'+fmtUsd(tw)+'</div>'
       +'<div class="kpi-meta">'+periodLbl+'</div></div>'+
     '<div class="kpi amb-k" onclick="showFinDrilldown(\'other\',\'Other Cost\')"><div class="kpi-lbl">Other Cost</div>'
-      +'<div class="kpi-main"><span class="kpi-num amb">AED '+Math.round(to).toLocaleString()+'</span><span class="kpi-pct ambp">'+op+'% rev</span></div>'
+      +'<div class="kpi-main"><span class="kpi-num amb">'+CUR+' '+Math.round(to).toLocaleString()+'</span><span class="kpi-pct ambp">'+op+'% rev</span></div>'
       +'<div class="kpi-meta" style="font-weight:600;color:var(--amb)">'+fmtUsd(to)+'</div>'
       +'<div class="kpi-meta">'+periodLbl+'</div></div>'+
     '<div class="kpi" onclick="showFinDrilldown(\'foodCostPct\',\'Food Cost %\')" style="border-top-color:#9B59B6 !important;"><div class="kpi-lbl" style="color:#9B59B6">Food Cost %</div>'
@@ -3772,7 +3779,7 @@ function renderFinancial(){
       +'<td class="mn">'+growthBadge(r.growth)+'</td>'
       +'<td class="mn" style="color:var(--mut)">'+fmtUsd(r.aed)+'</td></tr>';
   }).join('');
-  document.getElementById('wTot').textContent='Total: AED '+Math.round(tw).toLocaleString()+' / '+fmtUsd(tw);
+  document.getElementById('wTot').textContent='Total: '+CUR+' '+Math.round(tw).toLocaleString()+' / '+fmtUsd(tw);
   document.getElementById('wCnt').textContent=(wData.filter(function(r){return r.aed>0;}).length+' active · '+(growthNote?'Growth '+growthNote:''));
   document.getElementById('oBody').innerHTML=oData.map(function(r){
     return '<tr'+(r.aed===0?' style="color:var(--lt)"':'')+'>'
@@ -3781,13 +3788,13 @@ function renderFinancial(){
       +'<td class="mn">'+growthBadge(r.growth)+'</td>'
       +'<td class="mn" style="color:var(--mut)">'+fmtUsd(r.aed)+'</td></tr>';
   }).join('');
-  document.getElementById('oTot').textContent='Total: AED '+Math.round(to).toLocaleString()+' / '+fmtUsd(to);
+  document.getElementById('oTot').textContent='Total: '+CUR+' '+Math.round(to).toLocaleString()+' / '+fmtUsd(to);
   document.getElementById('oCnt').textContent=(oData.filter(function(r){return r.aed>0;}).length+' active · '+(growthNote?'Growth '+growthNote:''));
 
   // Charts — only show non-zero categories
   var wa=wData.filter(function(r){return Math.round(r.aed)>0;});
   var oa=oData.filter(function(r){return Math.round(r.aed)>0;});
-  var COPTS={responsive:true,maintainAspectRatio:false,layout:{padding:{right:14,top:14}},plugins:{legend:{display:false},tooltip:{backgroundColor:'#4A4A4A',cornerRadius:8,callbacks:{label:function(c){return'AED '+Math.round(c.parsed.y).toLocaleString();}}}},scales:{x:{grid:{display:false},ticks:{font:{size:9},maxRotation:35,color:'#A5A5A5'}},y:{beginAtZero:true,ticks:{font:{size:10},color:'#A5A5A5'}}}};
+  var COPTS={responsive:true,maintainAspectRatio:false,layout:{padding:{right:14,top:14}},plugins:{legend:{display:false},tooltip:{backgroundColor:'#4A4A4A',cornerRadius:8,callbacks:{label:function(c){return''+CUR+' '+Math.round(c.parsed.y).toLocaleString();}}}},scales:{x:{grid:{display:false},ticks:{font:{size:9},maxRotation:35,color:'#A5A5A5'}},y:{beginAtZero:true,ticks:{font:{size:10},color:'#A5A5A5'}}}};
   if(finWasteChart){finWasteChart.destroy();finWasteChart=null;}
   if(finOtherChart){finOtherChart.destroy();finOtherChart=null;}
   finWasteChart=new Chart(document.getElementById('wastageChart'),{type:'bar',data:{labels:wa.map(function(r){return r.cat;}),datasets:[{data:wa.map(function(r){return r.aed;}),backgroundColor:CAT_COLORS,borderRadius:4,barPercentage:0.75}]},options:COPTS});
@@ -3855,7 +3862,7 @@ function _renderDrillChart(){
 
   if(_drillKey==='revenue'){
     chartData=moFilter.map(function(mo){return(fin.kpis.revenue&&fin.kpis.revenue[mo])||0;});
-    chartLabel='Revenue (AED)'; chartColor='#00C07F'; isCurrency=true;
+    chartLabel='Revenue ('+CUR+')'; chartColor='#00C07F'; isCurrency=true;
   } else if(_drillKey==='deliveries'){
     chartData=moFilter.map(function(mo){return(fin.kpis.deliveries&&fin.kpis.deliveries[mo])||0;});
     chartLabel='Total Deliveries'; chartColor='#1A8FE3';
@@ -3866,12 +3873,12 @@ function _renderDrillChart(){
     chartData=moFilter.map(function(mo){
       return (fin.wastage||[]).reduce(function(s,c){return s+((c.vals&&c.vals[mo])||0);},0);
     });
-    chartLabel='Total Wastage (AED)'; chartColor='#D94040'; isCurrency=true;
+    chartLabel='Total Wastage ('+CUR+')'; chartColor='#D94040'; isCurrency=true;
   } else if(_drillKey==='other'){
     chartData=moFilter.map(function(mo){
       return (fin.other||[]).reduce(function(s,c){return s+((c.vals&&c.vals[mo])||0);},0);
     });
-    chartLabel='Other Cost (AED)'; chartColor='#C07A10'; isCurrency=true;
+    chartLabel='Other Cost ('+CUR+')'; chartColor='#C07A10'; isCurrency=true;
   } else if(_drillKey==='foodCostPct'){
     chartData=moFilter.map(function(mo){return(fin.kpis.foodCostPct&&fin.kpis.foodCostPct[mo])||null;});
     chartLabel='Food Cost %'; chartColor='#9B59B6'; isPercent=true;
@@ -3914,7 +3921,7 @@ function _renderDrillChart(){
             label:function(c){
               var v=c.parsed.y;
               if(v===null||v===undefined)return chartLabel+': —';
-              if(isCurrency)return chartLabel+': AED '+Math.round(v).toLocaleString()+' / $'+Math.round(v/3.67).toLocaleString();
+              if(isCurrency)return chartLabel+': '+CUR+' '+Math.round(v).toLocaleString()+' / $'+Math.round(v/FXU).toLocaleString();
               if(isPercent)return chartLabel+': '+Number(v).toFixed(2)+'%';
               return chartLabel+': '+Math.round(v).toLocaleString();
             }
@@ -3930,7 +3937,7 @@ function _renderDrillChart(){
             font:{size:10},color:'#A5A5A5',
             callback:function(v){
               if(isPercent)return v+'%';
-              if(isCurrency)return v>=1000000?'AED '+(v/1000000).toFixed(1)+'M':v>=1000?'AED '+(v/1000).toFixed(0)+'K':'AED '+v;
+              if(isCurrency)return v>=1000000?''+CUR+' '+(v/1000000).toFixed(1)+'M':v>=1000?''+CUR+' '+(v/1000).toFixed(0)+'K':''+CUR+' '+v;
               return v>=1000?(v/1000).toFixed(0)+'K':v;
             }
           }
@@ -6312,32 +6319,32 @@ function downloadFinancialExcel(){
   rows.push([]);
 
   // KPI section header
-  rows.push(['KPI','AED','USD','Growth %']);
-  rows.push(['Revenue',Math.round(d.revenue),Math.round(d.revenue/3.67),'—']);
+  rows.push(['KPI',CUR,'USD','Growth %']);
+  rows.push(['Revenue',Math.round(d.revenue),Math.round(d.revenue/FXU),'—']);
   rows.push(['Total Deliveries',Math.round(d.deliveries),'—',d.fmtGrowth(d.delGrowth)]);
   rows.push(['Avg DPD',d.dpd,'—',d.fmtGrowth(d.dpdGrowth)]);
-  rows.push(['Total Wastage',Math.round(d.tw),Math.round(d.tw/3.67),d.fmtGrowth(d.twGrowth)]);
-  rows.push(['Total Other Cost',Math.round(d.to),Math.round(d.to/3.67),d.fmtGrowth(d.toGrowth)]);
+  rows.push(['Total Wastage',Math.round(d.tw),Math.round(d.tw/FXU),d.fmtGrowth(d.twGrowth)]);
+  rows.push(['Total Other Cost',Math.round(d.to),Math.round(d.to/FXU),d.fmtGrowth(d.toGrowth)]);
 
   rows.push([]);
   rows.push([]);
 
   // Wastage breakdown
-  rows.push(['Total Wastage Cost Breakdown','AED','USD']);
+  rows.push(['Total Wastage Cost Breakdown',CUR,'USD']);
   d.wRows.forEach(function(r){
-    rows.push([r.cat,Math.round(r.aed),Math.round(r.aed/3.67)]);
+    rows.push([r.cat,Math.round(r.aed),Math.round(r.aed/FXU)]);
   });
-  rows.push(['TOTAL',Math.round(d.tw),Math.round(d.tw/3.67)]);
+  rows.push(['TOTAL',Math.round(d.tw),Math.round(d.tw/FXU)]);
 
   rows.push([]);
   rows.push([]);
 
   // Other cost breakdown
-  rows.push(['Other Cost Breakdown','AED','USD']);
+  rows.push(['Other Cost Breakdown',CUR,'USD']);
   d.oRows.forEach(function(r){
-    rows.push([r.cat,Math.round(r.aed),Math.round(r.aed/3.67)]);
+    rows.push([r.cat,Math.round(r.aed),Math.round(r.aed/FXU)]);
   });
-  rows.push(['TOTAL',Math.round(d.to),Math.round(d.to/3.67)]);
+  rows.push(['TOTAL',Math.round(d.to),Math.round(d.to/FXU)]);
 
   var ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[{wch:32},{wch:16},{wch:14},{wch:12}];
@@ -6376,11 +6383,11 @@ function downloadFinancialPdf(){
   // KPI summary boxes (5 KPIs: Revenue, Deliveries, DPD, Wastage, Other Cost)
   function growthColor(g){ return g===null?grey:(g>=0?green:red); }
   var kpis=[
-    {lbl:'Revenue',val:'AED '+Math.round(d.revenue).toLocaleString(),sub:'$'+Math.round(d.revenue/3.67).toLocaleString(),growth:null},
+    {lbl:'Revenue',val:''+CUR+' '+Math.round(d.revenue).toLocaleString(),sub:'$'+Math.round(d.revenue/FXU).toLocaleString(),growth:null},
     {lbl:'Total Deliveries',val:Math.round(d.deliveries).toLocaleString(),sub:'',growth:d.delGrowth},
     {lbl:'Avg DPD',val:d.dpd.toLocaleString(),sub:'',growth:d.dpdGrowth},
-    {lbl:'Total Wastage',val:'AED '+Math.round(d.tw).toLocaleString(),sub:'$'+Math.round(d.tw/3.67).toLocaleString(),growth:d.twGrowth},
-    {lbl:'Total Other Cost',val:'AED '+Math.round(d.to).toLocaleString(),sub:'$'+Math.round(d.to/3.67).toLocaleString(),growth:d.toGrowth}
+    {lbl:'Total Wastage',val:''+CUR+' '+Math.round(d.tw).toLocaleString(),sub:'$'+Math.round(d.tw/FXU).toLocaleString(),growth:d.twGrowth},
+    {lbl:'Total Other Cost',val:''+CUR+' '+Math.round(d.to).toLocaleString(),sub:'$'+Math.round(d.to/FXU).toLocaleString(),growth:d.toGrowth}
   ];
   var bx=14, by=28, bw=53, bh=20, gap=3;
   kpis.forEach(function(k,i){
@@ -6415,9 +6422,9 @@ function downloadFinancialPdf(){
   doc.text('Total Wastage Cost',14,tableY-2);
   doc.autoTable({
     startY:tableY,
-    head:[['Category','AED','USD']],
-    body:d.wRows.map(function(r){return[r.cat,Math.round(r.aed).toLocaleString(),'$'+Math.round(r.aed/3.67).toLocaleString()];}),
-    foot:[['TOTAL',Math.round(d.tw).toLocaleString(),'$'+Math.round(d.tw/3.67).toLocaleString()]],
+    head:[['Category',CUR,'USD']],
+    body:d.wRows.map(function(r){return[r.cat,Math.round(r.aed).toLocaleString(),'$'+Math.round(r.aed/FXU).toLocaleString()];}),
+    foot:[['TOTAL',Math.round(d.tw).toLocaleString(),'$'+Math.round(d.tw/FXU).toLocaleString()]],
     tableWidth:134,
     headStyles:{fillColor:green,textColor:[255,255,255],fontStyle:'bold',fontSize:8},
     footStyles:{fillColor:[230,249,241],textColor:dark,fontStyle:'bold',fontSize:8},
@@ -6434,9 +6441,9 @@ function downloadFinancialPdf(){
   doc.autoTable({
     startY:tableY,
     margin:{left:155},
-    head:[['Category','AED','USD']],
-    body:d.oRows.map(function(r){return[r.cat,Math.round(r.aed).toLocaleString(),'$'+Math.round(r.aed/3.67).toLocaleString()];}),
-    foot:[['TOTAL',Math.round(d.to).toLocaleString(),'$'+Math.round(d.to/3.67).toLocaleString()]],
+    head:[['Category',CUR,'USD']],
+    body:d.oRows.map(function(r){return[r.cat,Math.round(r.aed).toLocaleString(),'$'+Math.round(r.aed/FXU).toLocaleString()];}),
+    foot:[['TOTAL',Math.round(d.to).toLocaleString(),'$'+Math.round(d.to/FXU).toLocaleString()]],
     tableWidth:128,
     headStyles:{fillColor:green,textColor:[255,255,255],fontStyle:'bold',fontSize:8},
     footStyles:{fillColor:[230,249,241],textColor:dark,fontStyle:'bold',fontSize:8},
@@ -7035,7 +7042,7 @@ _lgReady();
           <div><div class="lgc-ctl-lbl">Invoice number</div><input id="lgcInvNo" class="lgc-input" style="width:100%;"/></div>
           <div><div class="lgc-ctl-lbl">Invoice date</div><input id="lgcInvDate" class="lgc-input" style="width:100%;" placeholder="31 Jul 2026"/></div>
           <div><div class="lgc-ctl-lbl">Applies to month</div><select id="lgcInvYm" class="lgc-input" style="width:100%;"></select></div>
-          <div><div class="lgc-ctl-lbl">Currency</div><input id="lgcInvCurrency" class="lgc-input" style="width:100%;" value="AED"/></div>
+          <div><div class="lgc-ctl-lbl">Currency</div><input id="lgcInvCurrency" class="lgc-input" style="width:100%;" value="<?= cur ?>"/></div>
         </div>
 
         <div class="lgc-ctl-lbl">Line items</div>

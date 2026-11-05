@@ -49,7 +49,13 @@ var CALO_API_CACHE_TTL = 60;            // seconds — live figures, so far shor
 var CALO_DELIVERY_STATS_PATH = '/ext/v1/stats/deliveries';
 // The README's example passes kitchen: 'BH001', which is Bahrain. Set the UAE
 // code here; left empty the parameter is simply not sent.
+// Kitchen code comes from Config.gs (CFG.kitchen) so a market only sets it
+// in one place. Set it here instead only to override for a one-off test.
 var CALO_KITCHEN             = '';
+function _caloKitchen_() {
+  if (CALO_KITCHEN) return CALO_KITCHEN;
+  try { return CFG_KITCHEN_(); } catch (e) { return ''; }
+}
 var CALO_SYNC_DAYS           = 14;      // how far back a run looks
 var CALO_SYNC_OVERWRITE      = false;   // true lets it correct figures already in the sheet
 
@@ -170,7 +176,8 @@ function _caloCountsByDate_(from, to) {
   }
   // The SDK takes day as { gte, lte }; over the wire that is day[gte]/day[lte].
   var params = { 'day[gte]': from, 'day[lte]': to };
-  if (CALO_KITCHEN) params.kitchen = CALO_KITCHEN;
+  var _kt = _caloKitchen_();
+  if (_kt) params.kitchen = _kt;
   var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, params);
   var norm = _caloNormaliseCounts_(json);
   if (!norm.found) {
@@ -197,10 +204,11 @@ function testDeliveryStats() {
   var from = _caloShift_(to, -4);
   Logger.log('GET ' + CALO_API_BASE + CALO_DELIVERY_STATS_PATH
     + '  day[gte]=' + from + '  day[lte]=' + to
-    + (CALO_KITCHEN ? '  kitchen=' + CALO_KITCHEN : '  (no kitchen filter)'));
+    + (_caloKitchen_() ? '  kitchen=' + _caloKitchen_() : '  (no kitchen filter)'));
   try {
     var params = { 'day[gte]': from, 'day[lte]': to };
-    if (CALO_KITCHEN) params.kitchen = CALO_KITCHEN;
+    var _kt = _caloKitchen_();
+    if (_kt) params.kitchen = _kt;
     var json = callDashboardApi(CALO_DELIVERY_STATS_PATH, params);
     Logger.log('\n──── raw response ────\n' + JSON.stringify(json, null, 2).substring(0, 4000));
     var norm = _caloNormaliseCounts_(json);
@@ -360,7 +368,7 @@ function syncDeliveriesToSheet(opts) {
               filled: [], alreadySet: [], differs: [], notInApi: [], wrote: 0 };
   try {
     var counts = _caloCountsByDate_(from, to);
-    var ss     = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var ss     = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet  = ss.getSheetByName('DELIVERIES');
     if (!sheet) throw new Error('DELIVERIES sheet not found.');
     var index  = _caloSheetIndex_(sheet).idx;

@@ -181,12 +181,17 @@ function _slkLabelFor_(ym) {
   return M[m] + ' ' + y;
 }
 
-// Dashboard.gs defines SS_FINANCIAL for the whole project. The id only needs
-// pasting below if this file is ever moved to a project of its own.
+// Config.gs holds the id for the whole project. The id only needs pasting
+// below if this file is ever moved to a project of its own.
 function _slkFinancialSsId_() {
-  if (typeof SS_FINANCIAL !== 'undefined' && SS_FINANCIAL) return SS_FINANCIAL;
+  try {
+    if (typeof SS_FINANCIAL_ === 'function') return SS_FINANCIAL_();
+  } catch (e) {
+    throw new Error('Financial spreadsheet id is not set in Config.gs. ' +
+                    'Run cfgSelfTest() to see what is missing. (' + e.message + ')');
+  }
   var ownId = '';   // ← only for standalone use
-  if (!ownId) throw new Error('No Financial spreadsheet id — this file expects Dashboard.gs in the same project.');
+  if (!ownId) throw new Error('No Financial spreadsheet id — this file expects Config.gs in the same project.');
   return ownId;
 }
 

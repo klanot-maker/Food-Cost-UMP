@@ -5,17 +5,24 @@
 function doGet(e) {
   var t = HtmlService.createTemplateFromFile('Index');
   t.resetToken = (e && e.parameter && e.parameter.reset) ? e.parameter.reset : '';
+  // Market facts are handed to the page before any data loads, so currency
+  // labels are right on the first paint instead of after the first fetch.
+  t.uiCfg = JSON.stringify(CFG_FOR_UI_());
+  t.cur   = CFG_CURRENCY_();
   return t.evaluate()
-    .setTitle('UMP Operations Dashboard')
+    .setTitle(CFG_MARKET_() + ' Operations Dashboard')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 // ── SPREADSHEET IDs ──────────────────────────────────────────
-const SS_FINANCIAL  = '1JvHBdSaeh6c2KIktDAOTub93jTOqs5znszzwKEdbe1o';
-const SS_COMPLAINTS = '1j1wZ3z3YMvWhDpQbzYTNUAWlaj2rRt1RwP1ENSX3Lr0';
-const SS_STAFF      = '1fA1ytS34bcUf-xua55d_RWCgmBwrZEYlvhQtSNwGPwE';
-// DOD Complaint sheet gid inside SS_COMPLAINTS
-const GID_DOD_COMPLAINT = 1747363719;
+// These now live in Config.gs — the one file each market edits.
+// Read them through SS_FINANCIAL_(), SS_COMPLAINTS_(), SS_STAFF_()
+// and GID_DOD_COMPLAINT_(), which are defined there.
+//
+// They are functions, not constants, on purpose: every .gs file shares
+// one global space and the file load order is not guaranteed, so a
+// constant here that read Config.gs could run before Config.gs existed.
+// A function body only runs when called, by which time all files are up.
 
 // ── LOADERS ──────────────────────────────────────────────────
 // Three focused functions fired in parallel from the client.
@@ -153,13 +160,13 @@ function _invalidateCache() {
 function getCapacityPageData(force) {
   // force skips the cache: pressing Refresh must show sheet edits made
   // in the last few minutes, not whatever was cached before them.
-  var _ck = _srcKey_(_CACHE_CAP, [SS_COMPLAINTS]);
+  var _ck = _srcKey_(_CACHE_CAP, [SS_COMPLAINTS_()]);
   if (!force) {
     var hit = _cacheGet_(_ck);
     if (hit) return hit;
   }
 
-  var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+  var ss = SpreadsheetApp.openById(SS_COMPLAINTS_());
   var data = {
     capacity:    getCapacityData(ss),
     deliveries:  getDeliveriesData(ss),
@@ -177,14 +184,14 @@ function getCapacityPageData(force) {
 function getFinancialComplaintsData(force) {
   // force skips the cache: pressing Refresh must show sheet edits made
   // in the last few minutes, not whatever was cached before them.
-  var _ck = _srcKey_(_CACHE_FIN, [SS_FINANCIAL, SS_COMPLAINTS]);
+  var _ck = _srcKey_(_CACHE_FIN, [SS_FINANCIAL_(), SS_COMPLAINTS_()]);
   if (!force) {
     var hit = _cacheGet_(_ck);
     if (hit) return hit;
   }
 
-  var ssF = SpreadsheetApp.openById(SS_FINANCIAL);
-  var ssC = SpreadsheetApp.openById(SS_COMPLAINTS);
+  var ssF = SpreadsheetApp.openById(SS_FINANCIAL_());
+  var ssC = SpreadsheetApp.openById(SS_COMPLAINTS_());
   var data = {
     financial:  getFinancialData(ssF),
     complaints: getComplaintsData(ssC)
@@ -197,13 +204,13 @@ function getFinancialComplaintsData(force) {
 function getStaffPageData(force) {
   // force skips the cache: pressing Refresh must show sheet edits made
   // in the last few minutes, not whatever was cached before them.
-  var _ck = _srcKey_(_CACHE_STAFF, [SS_STAFF]);
+  var _ck = _srcKey_(_CACHE_STAFF, [SS_STAFF_()]);
   if (!force) {
     var hit = _cacheGet_(_ck);
     if (hit) return hit;
   }
 
-  var ss = SpreadsheetApp.openById(SS_STAFF);
+  var ss = SpreadsheetApp.openById(SS_STAFF_());
   var data = {
     staff:        getStaffData(ss),
     staffSummary: getStaffSummaryData(ss)
@@ -216,14 +223,14 @@ function getStaffPageData(force) {
 function getOperationOverviewData(force) {
   // force skips the cache: pressing Refresh must show sheet edits made
   // in the last few minutes, not whatever was cached before them.
-  var _ck = _srcKey_(_CACHE_OPS, [SS_COMPLAINTS, SS_STAFF]);
+  var _ck = _srcKey_(_CACHE_OPS, [SS_COMPLAINTS_(), SS_STAFF_()]);
   if (!force) {
     var hit = _cacheGet_(_ck);
     if (hit) return hit;
   }
 
-  var ssC = SpreadsheetApp.openById(SS_COMPLAINTS);
-  var ssS = SpreadsheetApp.openById(SS_STAFF);
+  var ssC = SpreadsheetApp.openById(SS_COMPLAINTS_());
+  var ssS = SpreadsheetApp.openById(SS_STAFF_());
 
   var deliveries = getDeliveriesData(ssC);
   var today      = new Date();
@@ -317,11 +324,11 @@ function getOperationOverviewData(force) {
 // ════════════════════════════════════════════════════════════
 function getDodComplaintsData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheets = ss.getSheets();
     var sheet  = null;
     for (var i = 0; i < sheets.length; i++) {
-      if (sheets[i].getSheetId() === GID_DOD_COMPLAINT) { sheet = sheets[i]; break; }
+      if (sheets[i].getSheetId() === GID_DOD_COMPLAINT_()) { sheet = sheets[i]; break; }
     }
     if (!sheet) sheet = ss.getSheetByName('DOD Complaint');
     if (!sheet) return { records: [], headers: [] };
@@ -370,7 +377,7 @@ function getDodComplaintsData(ss) {
 // ════════════════════════════════════════════════════════════
 function _getTodayStaffData(ss, todayStr) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_STAFF);
+    ss = ss || SpreadsheetApp.openById(SS_STAFF_());
     var sheets   = ss.getSheets();
     var KEYWORDS = ['kitchen','steward','dispatch','office'];
     var MONTH_MAP = {january:0,february:1,march:2,april:3,may:4,june:5,july:6,august:7,
@@ -483,7 +490,7 @@ function getAllData() {
 // ════════════════════════════════════════════════════════════
 function getFinancialData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_FINANCIAL);
+    ss = ss || SpreadsheetApp.openById(SS_FINANCIAL_());
     var sheet = ss.getSheetByName('Financial cost') || ss.getSheets()[0];
     var all   = sheet.getDataRange().getValues();
 
@@ -594,7 +601,7 @@ function getFinancialData(ss) {
 // ════════════════════════════════════════════════════════════
 function getComplaintsData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheets = ss.getSheets();
 
     // ── 1. Read MOM Complaints for targets (row 1) and per-month rates ──
@@ -665,7 +672,7 @@ function getComplaintsData(ss) {
     // ── 2. Read DOD Complaint for daily counts ──
     var dodSheet = null;
     for (var i = 0; i < sheets.length; i++) {
-      if (sheets[i].getSheetId() === GID_DOD_COMPLAINT) { dodSheet = sheets[i]; break; }
+      if (sheets[i].getSheetId() === GID_DOD_COMPLAINT_()) { dodSheet = sheets[i]; break; }
     }
     if (!dodSheet) dodSheet = ss.getSheetByName('DOD Complaint');
     if (!dodSheet) return { months: [], targets: targets };
@@ -725,7 +732,7 @@ function getComplaintsData(ss) {
 // ════════════════════════════════════════════════════════════
 function getStaffData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_STAFF);
+    ss = ss || SpreadsheetApp.openById(SS_STAFF_());
     var sheets = ss.getSheets();
     var KEYWORDS  = ['kitchen','steward','dispatch','office'];
     var MONTH_MAP = {january:0,february:1,march:2,april:3,may:4,june:5,july:6,august:7,
@@ -831,7 +838,7 @@ function getStaffData(ss) {
 // ════════════════════════════════════════════════════════════
 function getStaffSummaryData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_STAFF);
+    ss = ss || SpreadsheetApp.openById(SS_STAFF_());
     var sheets = ss.getSheets();
     var MONTH_MAP = {january:0,february:1,march:2,april:3,may:4,june:5,july:6,august:7,
                      september:8,october:9,november:10,december:11};
@@ -913,7 +920,7 @@ function getStaffSummaryData(ss) {
 // ════════════════════════════════════════════════════════════
 function updateComplaintsValue(monthLabel, field, value) {
   try {
-    var ss     = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var ss     = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet  = null;
     var sheets = ss.getSheets();
     for (var i = 0; i < sheets.length; i++) {
@@ -948,7 +955,7 @@ function updateComplaintsValue(monthLabel, field, value) {
 // ════════════════════════════════════════════════════════════
 function updateStaffValue(sheetName, deptName, dateStr, field, value) {
   try {
-    var ss    = SpreadsheetApp.openById(SS_STAFF);
+    var ss    = SpreadsheetApp.openById(SS_STAFF_());
     var sheet = sheetName ? ss.getSheetByName(sheetName) : null;
 
     if (!sheet) {
@@ -1005,7 +1012,7 @@ function updateStaffValue(sheetName, deptName, dateStr, field, value) {
 // ════════════════════════════════════════════════════════════
 function addStaffRow(sheetName, deptName, rowData) {
   try {
-    var ss    = SpreadsheetApp.openById(SS_STAFF);
+    var ss    = SpreadsheetApp.openById(SS_STAFF_());
     var sheet = ss.getSheetByName(sheetName);
     if (!sheet) throw new Error('Sheet not found: ' + sheetName);
 
@@ -1082,7 +1089,7 @@ function addStaffRow(sheetName, deptName, rowData) {
 // ════════════════════════════════════════════════════════════
 function updateFinancialValue(monthLabel, field, value) {
   try {
-    var ss    = SpreadsheetApp.openById(SS_FINANCIAL);
+    var ss    = SpreadsheetApp.openById(SS_FINANCIAL_());
     var sheet = ss.getSheetByName('Financial cost') || ss.getSheets()[0];
     var all   = sheet.getDataRange().getValues();
 
@@ -1135,7 +1142,7 @@ function updateFinancialValue(monthLabel, field, value) {
 // ════════════════════════════════════════════════════════════
 function getCapacityData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet = ss.getSheetByName('CAPACITY');
     if (!sheet) return { error: 'CAPACITY sheet not found' };
 
@@ -1204,7 +1211,7 @@ function getCapacityData(ss) {
 // ════════════════════════════════════════════════════════════
 function getDeliveriesData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet = ss.getSheetByName('DELIVERIES');
     if (!sheet) return { records: [] };
 
@@ -1242,7 +1249,7 @@ function getDeliveriesData(ss) {
 // ════════════════════════════════════════════════════════════
 function addDeliveryRecord(dateStr, count) {
   try {
-    var ss    = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var ss    = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet = ss.getSheetByName('DELIVERIES');
     if (!sheet) throw new Error('DELIVERIES sheet not found');
 
@@ -1294,7 +1301,7 @@ function addDeliveryRecord(dateStr, count) {
 // ════════════════════════════════════════════════════════════
 function getForecastData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet = ss.getSheetByName('FORECAST');
     if (!sheet) return { records: [] };
     var all = sheet.getDataRange().getValues();
@@ -1332,7 +1339,7 @@ function saveDeliveryWithForecast(dateStr, count, forecast) {
     addDeliveryRecord(dateStr, count);
 
     // 2. Upsert FORECAST sheet
-    var ss    = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var ss    = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet = ss.getSheetByName('FORECAST');
     if (!sheet) {
       sheet = ss.insertSheet('FORECAST');
@@ -1376,7 +1383,7 @@ function saveDeliveryWithForecast(dateStr, count, forecast) {
 // ════════════════════════════════════════════════════════════
 function getLogisticsData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet = ss.getSheetByName('UPDATES');
     if (!sheet) return { rows: [] };
     var all = sheet.getDataRange().getValues();
@@ -1406,7 +1413,7 @@ function getLogisticsData(ss) {
 // ════════════════════════════════════════════════════════════
 function getLogisticsStaffData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet = ss.getSheetByName('Logistics');
     if (!sheet) return { rows: [] };
     var all = sheet.getDataRange().getValues();
@@ -1569,7 +1576,7 @@ function parseLogisticsInvoiceText(text) {
   var raw = String(text || '').replace(/ /g, ' ');
   var lines = raw.split(/\r?\n/).map(function(s){ return s.trim(); });
 
-  var invoiceNo = '', invoiceDate = '', supplier = '', currency = 'AED';
+  var invoiceNo = '', invoiceDate = '', supplier = '', currency = CFG_CURRENCY_();
 
   var mNo = raw.match(/#\s*(INV[-\s]?[A-Za-z0-9\-\/]+)/i);
   if (mNo) invoiceNo = mNo[1].replace(/\s+/g, '-').toUpperCase();
@@ -1577,9 +1584,15 @@ function parseLogisticsInvoiceText(text) {
   var mDate = raw.match(/Invoice\s*Date\s*[:\-]?\s*([0-9]{1,2}\s+[A-Za-z]{3,}\s+[0-9]{4})/i);
   if (mDate) invoiceDate = mDate[1];
 
-  if (/\bAED\b/.test(raw)) currency = 'AED';
+  // An invoice may be billed in a currency other than the market's own, so
+  // the text is trusted over the default when it names one explicitly.
+  if      (/\bAED\b/.test(raw)) currency = 'AED';
   else if (/\bQAR\b/.test(raw)) currency = 'QAR';
   else if (/\bSAR\b/.test(raw)) currency = 'SAR';
+  else if (/\bBHD\b/.test(raw)) currency = 'BHD';
+  else if (/\bKWD\b/.test(raw)) currency = 'KWD';
+  else if (/\bOMR\b/.test(raw)) currency = 'OMR';
+  else if (/\bUSD\b/.test(raw)) currency = 'USD';
 
   // ── Supplier ────────────────────────────────────────────────
   // The vendor block sits above "TAX INVOICE" and above "Bill To".
@@ -1676,7 +1689,8 @@ function parseLogisticsInvoiceText(text) {
   var summaryAt = lines.length;
   var lastStart = starts.length ? starts[starts.length - 1].i : 0;
   for (var sIdx = lastStart + 1; sIdx < lines.length; sIdx++) {
-    if (/^(sub\s*total|balance\s*due|tax\s*summary|total\s+AED)/i.test(lines[sIdx])) { summaryAt = sIdx; break; }
+    // "total AED" in UAE, "total BHD" in Bahrain — any 3-letter code.
+    if (/^(sub\s*total|balance\s*due|tax\s*summary|total\s+[A-Z]{3}\b)/i.test(lines[sIdx])) { summaryAt = sIdx; break; }
   }
   var blocks = [];
   for (var b2 = 0; b2 < starts.length; b2++) {
@@ -1956,7 +1970,7 @@ function reparseAllStoredInvoices(max) {
   max = max || 3;
   var res = { ok: true, build: UMP_BUILD, updated: [], skipped: [], failed: [], remaining: 0 };
   try {
-    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
     if (!sh) return { ok: false, error: 'No LOGISTICS INVOICES sheet found.' };
 
@@ -1967,7 +1981,7 @@ function reparseAllStoredInvoices(max) {
       if (!id || seen[id]) continue;
       seen[id] = 1;
       list.push({ id: id, ym: _normYm_(all[r][1]), supplier: String(all[r][2] || ''),
-                  invoiceNo: String(all[r][3] || ''), currency: String(all[r][5] || 'AED'),
+                  invoiceNo: String(all[r][3] || ''), currency: String(all[r][5] || CFG_CURRENCY_()),
                   fileUrl: String(all[r][12] || '') });
     }
 
@@ -2030,7 +2044,7 @@ function saveLogisticsInvoice(payload) {
     if (!items.length) throw new Error('Add at least one line item before saving.');
     if (!payload.ym) throw new Error('Pick the month this invoice belongs to.');
 
-    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sh = _ensureLogisticsInvSheet_(ss);
     var all = sh.getDataRange().getValues();
 
@@ -2085,7 +2099,7 @@ function saveLogisticsInvoice(payload) {
       if (tot === null) tot = (net || 0) + (vat || 0);
       if (net === null) net = tot - (vat || 0);
       return [id, payload.ym, supplier, invoiceNo, payload.invoiceDate || '',
-              payload.currency || 'AED', String(it.description || '').trim(),
+              payload.currency || CFG_CURRENCY_(), String(it.description || '').trim(),
               net, vat || 0, tot, now, who, payload.fileUrl || '',
               hdrNet, hdrVat, hdrTot,
               String(it.category || _invCategory_(it.description))];
@@ -2124,7 +2138,7 @@ function _deleteInvoiceRows_(sh, id, supplier, invoiceNo) {
 
 function deleteLogisticsInvoice(id, supplier, invoiceNo) {
   try {
-    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
     if (!sh) return { ok: false, removed: 0, error: 'The LOGISTICS INVOICES sheet was not found.' };
     var removed = _deleteInvoiceRows_(sh, id, supplier, invoiceNo);
@@ -2141,13 +2155,13 @@ function deleteLogisticsInvoice(id, supplier, invoiceNo) {
 
 // Grouped back into invoices for the page.
 function getLogisticsInvoiceData(force) {
-  var _ck = _srcKey_(_CACHE_INV, [SS_COMPLAINTS]);
+  var _ck = _srcKey_(_CACHE_INV, [SS_COMPLAINTS_()]);
   if (!force) {
     var hit = _cacheGet_(_ck);
     if (hit) return hit;
   }
   try {
-    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sh = ss.getSheetByName(SHEET_LOGISTICS_INV);
     if (!sh) return { invoices: [] };
     var all = sh.getDataRange().getValues();
@@ -2164,7 +2178,7 @@ function getLogisticsInvoiceData(force) {
         } else { ds = String(dv || ''); }
         byId[id] = { id: id, ym: _normYm_(all[r][1]), supplier: String(all[r][2] || ''),
                      invoiceNo: String(all[r][3] || ''), invoiceDate: ds,
-                     currency: String(all[r][5] || 'AED'), items: [],
+                     currency: String(all[r][5] || CFG_CURRENCY_()), items: [],
                      net: 0, vat: 0, total: 0,
                      sumNet: 0, sumVat: 0, sumTotal: 0,
                      hdrNet: safeNum(all[r][13]), hdrVat: safeNum(all[r][14]), hdrTotal: safeNum(all[r][15]),
@@ -2204,7 +2218,7 @@ function getLogisticsInvoiceData(force) {
 // ════════════════════════════════════════════════════════════
 function getWowDistrictData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet = ss.getSheetByName('WOW DISTRICT');
     if (!sheet) return { headers: [], rows: [] };
     var all = sheet.getDataRange().getValues();
@@ -2228,7 +2242,7 @@ function getWowDistrictData(ss) {
 // ════════════════════════════════════════════════════════════
 function getDistrictDeliveriesData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet = ss.getSheetByName('DISTRICT DELIVERIES');
     if (!sheet) return { headers: [], rows: [] };
     var all = sheet.getDataRange().getValues();
@@ -2267,7 +2281,7 @@ function getDistrictDeliveriesData(ss) {
 // ════════════════════════════════════════════════════════════
 function updateCapacityTarget(weekStr, newTarget) {
   try {
-    var ss    = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var ss    = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet = ss.getSheetByName('CAPACITY');
     if (!sheet) throw new Error('CAPACITY sheet not found');
     var all = sheet.getDataRange().getValues();
@@ -2370,7 +2384,7 @@ function _normDateStr_(v) {
 
 function getDistrictShiftData(ss) {
   try {
-    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS);
+    ss = ss || SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sh = ss.getSheetByName(SHEET_DISTRICT_SHIFTS);
     if (!sh) return { byDate: {}, shifts: DISTRICT_SHIFT_NAMES };
     var lay = _dsLayout_(sh);
@@ -2399,7 +2413,7 @@ function getDistrictShiftData(ss) {
 function saveDistrictShiftRow(payload) {
   try {
     if (!payload || !payload.dateStr) throw new Error('No date given.');
-    var ss = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var ss = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var districts = _districtNames_(ss);
     var sh = _ensureDistrictShiftSheet_(ss, districts);
     var lay = _dsLayout_(sh);
@@ -2516,7 +2530,7 @@ function _ddSyncTotal_(dd, row, ddHdr) {
 // ════════════════════════════════════════════════════════════
 function updateDistrictRow(sheetRow, colIdxs, values) {
   try {
-    var ss    = SpreadsheetApp.openById(SS_COMPLAINTS);
+    var ss    = SpreadsheetApp.openById(SS_COMPLAINTS_());
     var sheet = ss.getSheetByName('DISTRICT DELIVERIES');
     if (!sheet) throw new Error('DISTRICT DELIVERIES sheet not found');
     for (var i = 0; i < colIdxs.length; i++) {
@@ -2565,7 +2579,7 @@ function fmtCellDate(val) {
 // Columns: A=Email  B=Password  C=Role  D=ResetToken  E=ResetExpiry  F=Status
 // Roles: super-admin | admin | editor | viewer
 // Status: approved (all users); sheet is auto-migrated on first call
-var SUPER_ADMINS = ['k.lanot@calo.app', 'a.mohamed@calo.app'];
+// The super-admin list lives in Config.gs; read via CFG_SUPER_ADMINS_().
 
 // ── PASSWORD STORAGE ─────────────────────────────────────────
 // Passwords used to sit in the sheet as typed, which meant anyone who could
@@ -2649,17 +2663,17 @@ function _tokWrite_(sheet, row, token, expiry) {
 
 
 function _isSuperAdmin(email) {
-  return SUPER_ADMINS.indexOf((email||'').trim().toLowerCase()) >= 0;
+  return CFG_SUPER_ADMINS_().indexOf((email||'').trim().toLowerCase()) >= 0;
 }
 
 function _acSheet() {
-  var ss = SpreadsheetApp.openById(SS_FINANCIAL);
+  var ss = SpreadsheetApp.openById(SS_FINANCIAL_());
   var sh = ss.getSheetByName('Access Control');
   if (!sh) {
     // Brand-new sheet — create with headers and seed Super Admins
     sh = ss.insertSheet('Access Control');
     sh.appendRow(['Email','Password','Role','ResetToken','ResetExpiry','Status']);
-    SUPER_ADMINS.forEach(function(e) {
+    CFG_SUPER_ADMINS_().forEach(function(e) {
       sh.appendRow([e, '', 'super-admin', '', '', 'approved']);
     });
     return sh;
@@ -3027,7 +3041,7 @@ function hashAllPlaintextPasswords(callerEmail) {
 // Columns: A=Timestamp  B=Email  C=Page  D=Text
 function getComments(page) {
   try {
-    var ss    = SpreadsheetApp.openById(SS_FINANCIAL);
+    var ss    = SpreadsheetApp.openById(SS_FINANCIAL_());
     var sheet = ss.getSheetByName('Comments');
     if (!sheet) return [];
     var rows  = sheet.getDataRange().getValues();
@@ -3044,7 +3058,7 @@ function addComment(page, text) {
   try {
     if (!text || !text.trim()) return {ok: false, err: 'Empty comment.'};
     var email = Session.getActiveUser().getEmail();
-    var ss    = SpreadsheetApp.openById(SS_FINANCIAL);
+    var ss    = SpreadsheetApp.openById(SS_FINANCIAL_());
     var sheet = ss.getSheetByName('Comments');
     if (!sheet) {
       sheet = ss.insertSheet('Comments');
