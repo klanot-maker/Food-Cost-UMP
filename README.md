@@ -114,7 +114,17 @@ which is the denominator for per-delivery cost on the Financial page.
 
 ## Before copying this to another market
 
+**Start from `template/`, not from these files.** It is the same dashboard
+with every UAE value taken out: no spreadsheet ids, no delivery figures, and
+— the one that matters — none of the demo data that `Index.html` falls back
+to when the sheets are empty, which is exactly the state a new market is in
+on its first day. `template/SETUP.md` is the walkthrough.
+
 1. Edit `Config.gs` only, then run `cfgSelfTest()`.
 2. Confirm which tab the financial reader resolves to — do not rely on order.
 3. Keep `Config.gs` and your own new files as yours; leave the rest as the
    template, or template fixes stop merging cleanly.
+
+`tests/template-neutral.test.js` checks that the template carries no market's
+data and that every line differing from the live UAE files is a deliberate
+change, so the copy cannot quietly go stale.

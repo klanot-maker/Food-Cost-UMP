@@ -8,6 +8,7 @@ shipped file changes, these run against the change.
     node tests/filter.test.js         # which rows count as a delivery
     node tests/sync-window.test.js    # the Sunday-to-Saturday window
     node tests/year-rollover.test.js  # any column, and the turn of the year
+    node tests/template-neutral.test.js   # template/ carries no market's data
 
 `sync-window.test.js` also covers `caloCheckHistory()`, which is read-only.
 
@@ -33,4 +34,12 @@ at the 29th in a leap year. It also covers `caloEnsureYear()` refusing a year
 older than the tab, refusing a two-digit year, and doing nothing when asked for
 a year already there.
 
-All three exit non-zero on failure.
+`template-neutral.test.js` is the odd one out: it reads files rather than
+running the code. It proves `template/` holds no UAE workbook id, no delivery
+figures in `CALO_TRUTH`, and no demo data in `Index.html` — the UAE copy falls
+back to five months of real figures when the sheets are empty, and a new
+market's sheets are empty. It also diffs `template/` against the live files
+and fails on any difference not on a list of deliberate ones, so a template
+that has fallen behind says so instead of being quietly out of date.
+
+All four exit non-zero on failure.
