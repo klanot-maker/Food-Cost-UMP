@@ -28,7 +28,7 @@
 // cancelled, skipped, paused and suspended ones. For UAE that runs about
 // 400–580 a day above the figure the operation recognises. Which rows to
 // include is therefore a decision, not a detail, and it lives in the
-// CALO_DLV_FILTER property. Run caloProbeStatuses() to settle it against a
+// CALO_DLV_FILTER property. Run caloFindFilter() to settle it against a
 // number you trust; until then the sync refuses to run, because a delivery
 // count that quietly includes cancellations is worse than no count at all.
 //
@@ -36,14 +36,14 @@
 //   CALO_API_KEY      required. Sent as X-Api-Key. Needs kitchen:stats:read.
 //   CALO_API_BASE     optional. Defaults to the gateway below.
 //   CALO_QS_STYLE     written by caloDiagnose().      Leave alone.
-//   CALO_DLV_FILTER   written by caloProbeStatuses(). Leave alone.
+//   CALO_DLV_FILTER   written by caloFindFilter(). Leave alone.
 //
 // The kitchen comes from Config.gs (CFG.kitchen), so a market that copies
 // this dashboard gets its own without editing code.
 //
 // ── ORDER TO RUN THINGS ─────────────────────────────────────
 //   1. caloDiagnose()                     key + encoding
-//   2. caloProbeStatuses('2026-11-05', 5321)   which rows to count
+//   2. caloFindFilter()                   which rows to count
 //   3. caloPreviewSync()                  what would change. Writes nothing.
 //   4. caloSyncDeliveries()               writes it
 //   5. caloInstallDailySync()             every morning
@@ -276,9 +276,9 @@ function caloDiagnose() {
   PropertiesService.getScriptProperties().setProperty('CALO_QS_STYLE', winner);
   say('Encoding "' + winner + '" saved.');
   say('');
-  say('NEXT: caloProbeStatuses(\'<a day you can check>\', <the number your');
-  say('dashboard shows for it>) — unfiltered, this endpoint also counts');
-  say('cancelled and skipped deliveries.');
+  say('NEXT: caloFindFilter() — unfiltered, this endpoint also counts');
+  say('cancelled and skipped deliveries, so which rows belong in a column');
+  say('headed DELIVERIES still has to be settled.');
 
   var text = out.join('\n');
   Logger.log(text);
@@ -300,96 +300,138 @@ function caloDiagnose() {
  * show how the day breaks down, so that if nothing matches exactly we can
  * see what the gap is made of instead of guessing again.
  */
+var CALO_TRUTH = {
+  '2026-11-01': 2130,
+  '2026-11-02': 5570,
+  '2026-11-03': 5625,
+  '2026-11-04': 5602,
+  '2026-11-05': 5321,
+  '2026-11-06': 3807
+};
+
+/**
+ * Every way the SDK offers to narrow the set, plus a few spellings of each
+ * because the external API takes deliveryStatus as a free string and does
+ * not publish its vocabulary.
+ *
+ * `measure: true` marks a row that is not a candidate answer. Those are
+ * run against one day only, to size each excluded group, so that if nothing
+ * matches outright the shortfall can be read rather than guessed at.
+ */
 var _CALO_STATUS_TRIES = [
-  { label: '(no status filter)',        f: {} },
+  { label: '(no filter)',                    f: {} },
 
-  { label: 'deliveryStatus=delivered',  f: { deliveryStatus: 'delivered' } },
-  { label: 'deliveryStatus=DELIVERED',  f: { deliveryStatus: 'DELIVERED' } },
-  { label: 'deliveryStatus=confirmed',  f: { deliveryStatus: 'confirmed' } },
-  { label: 'deliveryStatus=CONFIRMED',  f: { deliveryStatus: 'CONFIRMED' } },
+  { label: 'skipped=false',                  f: { skipped: false } },
+  { label: 'expired=false',                  f: { expired: false } },
+  { label: 'skipped=false expired=false',    f: { skipped: false, expired: false } },
 
-  { label: 'skipped=false',             f: { skipped: false } },
-  { label: 'expired=false',             f: { expired: false } },
-  { label: 'skipped=false expired=false', f: { skipped: false, expired: false } },
+  { label: 'subscriptionStatus=ongoing',     f: { subscriptionStatus: ['ongoing'] } },
+  { label: 'subStatus=ongoing skipped=false',f: { subscriptionStatus: ['ongoing'], skipped: false } },
 
-  { label: 'skipped=false + delivered', f: { skipped: false, deliveryStatus: 'delivered' } },
-  { label: 'subscriptionStatus=ongoing', f: { subscriptionStatus: ['ongoing'] } },
+  { label: 'status=upcoming',                f: { status: ['upcoming'] } },
+  { label: 'deliveryStatus=confirmed',       f: { deliveryStatus: 'confirmed' } },
+  { label: 'deliveryStatus=CONFIRMED',       f: { deliveryStatus: 'CONFIRMED' } },
+  { label: 'deliveryStatus=delivered',       f: { deliveryStatus: 'delivered' } },
+  { label: 'deliveryStatus=DELIVERED',       f: { deliveryStatus: 'DELIVERED' } },
 
-  // Measurements, not answers: how big is each excluded group?
-  { label: '  ·measure· status=cancelled', f: { status: ['cancelled'] }, measure: true },
-  { label: '  ·measure· status=paused',    f: { status: ['paused']    }, measure: true },
-  { label: '  ·measure· status=suspended', f: { status: ['suspended'] }, measure: true },
-  { label: '  ·measure· skipped=true',     f: { skipped: true         }, measure: true }
+  { label: 'emptyFood=false',                f: { emptyFood: false } },
+
+  // Sized against one day only — how big is each group we may need to drop?
+  { label: '  measure status=cancelled',       f: { status: ['cancelled'] },       measure: true },
+  { label: '  measure status=paused',          f: { status: ['paused'] },          measure: true },
+  { label: '  measure status=suspended',       f: { status: ['suspended'] },       measure: true },
+  { label: '  measure status=paymentRequired', f: { status: ['paymentRequired'] }, measure: true },
+  { label: '  measure skipped=true',           f: { skipped: true },               measure: true },
+  { label: '  measure expired=true',           f: { expired: true },               measure: true }
 ];
 
 /**
- * Finds which filter reproduces a number you already trust.
+ * Finds the filter that reproduces the Calo dashboard, across every day in
+ * CALO_TRUTH at once.
  *
- *   caloProbeStatuses('2026-11-05', 5321)
+ *   caloFindFilter()
  *
- * Pass a day and what your Calo dashboard shows for it. An exact match is
- * saved and used by every later sync. Nothing is written to any sheet.
+ * One day agreeing can be coincidence; six agreeing is the answer. Only a
+ * filter that matches EVERY day is saved. Nothing is written to any sheet.
  */
-function caloProbeStatuses(ymd, target) {
+function caloFindFilter() {
   var out = [];
   function say(s) { out.push(s); }
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(ymd || ''))) {
-    throw new Error('Pass a day and the figure you trust for it, e.g. ' +
-                    'caloProbeStatuses(\'2026-11-05\', 5321)');
-  }
-  target = Number(target) || 0;
+  var days = Object.keys(CALO_TRUTH).sort();
+  if (!days.length) throw new Error('CALO_TRUTH is empty. Put the figures your ' +
+                                    'Calo dashboard shows at the top of this file.');
 
-  say('WHICH ROWS COUNT AS A DELIVERY — ' + ymd + '   (' + new Date() + ')');
+  say('FINDING THE RIGHT FILTER  (' + new Date() + ')');
   say('');
   say('Kitchen: ' + _caloKitchen_());
-  if (target) say('Target:  ' + target + '   (what you told me the dashboard shows)');
-  else        say('No target given — counts are reported for comparison only.');
+  say('Checked against the Calo dashboard for ' + days.length + ' days:');
+  days.forEach(function(d) { say('   ' + d + '  ' + CALO_TRUTH[d]); });
   say('');
-  say('   filter                          count   vs target');
+  say('   filter                           match   difference per day (' +
+      days.map(function(d) { return d.substring(8); }).join(' ') + ')');
 
-  var exact = null;
+  var best = null, bestScore = -1;
+
   _CALO_STATUS_TRIES.forEach(function(t) {
-    var c = _caloCountFor_(ymd, t.f);
-    if (!c.ok) {
-      say('   ' + _caloPadRight_(t.label, 32) + '—       ' + c.why.substring(0, 60));
-      return;
-    }
-    var diff = target ? (c.count - target) : null;
-    var mark = '';
-    if (target && c.count === target) mark = '  ←← EXACT MATCH';
-    say('   ' + _caloPadRight_(t.label, 32) + _caloPadRight_(c.count, 8) +
-        (diff === null ? '' : (diff > 0 ? '+' : '') + diff) + mark);
-    if (!exact && !t.measure && target && c.count === target) exact = t;
+    if (t.measure) return;                     // sized separately, below
+    var hits = 0, cells = [], anyFail = false;
+    days.forEach(function(d) {
+      var c = _caloCountFor_(d, t.f);
+      if (!c.ok) { cells.push('  err'); anyFail = true; return; }
+      var diff = c.count - CALO_TRUTH[d];
+      if (diff === 0) hits++;
+      cells.push(_caloPadLeft_(diff === 0 ? '0' : (diff > 0 ? '+' : '') + diff, 5));
+    });
+    var mark = (hits === days.length) ? '  <<< MATCHES EVERY DAY' : '';
+    say('   ' + _caloPadRight_(t.label, 33) + _caloPadRight_(hits + '/' + days.length, 8) +
+        cells.join(' ') + mark);
+    if (!anyFail && hits > bestScore) { bestScore = hits; best = t; }
+  });
+
+  say('');
+
+  // ── size each group we might need to drop ──────────────────
+  // Run on one settled day only; the point is proportion, not a series.
+  var probe = days[days.length - 1];
+  var base  = _caloCountFor_(probe, {});
+  say('── how ' + probe + ' breaks down  (unfiltered ' +
+      (base.ok ? base.count : '?') + ', dashboard ' + CALO_TRUTH[probe] + ', so ' +
+      (base.ok ? (base.count - CALO_TRUTH[probe]) + ' rows must come out' : 'unknown') + ')');
+  _CALO_STATUS_TRIES.forEach(function(t) {
+    if (!t.measure) return;
+    var c = _caloCountFor_(probe, t.f);
+    say('   ' + _caloPadRight_(t.label.replace(/^\s+measure\s+/, ''), 24) +
+        (c.ok ? c.count : 'err — ' + c.why.substring(0, 60)));
   });
   say('');
 
-  if (exact) {
+  if (best && bestScore === days.length) {
     PropertiesService.getScriptProperties()
-      .setProperty('CALO_DLV_FILTER', JSON.stringify(exact.f));
-    say('Saved: ' + exact.label);
-    say('Every sync from now on uses that filter.');
+      .setProperty('CALO_DLV_FILTER', JSON.stringify(best.f));
+    say('SAVED: ' + best.label + '   ' + JSON.stringify(best.f));
+    say('Every sync from now on counts deliveries that way.');
     say('');
-    say('NEXT: caloPreviewSync()');
-  } else if (target) {
-    say('No filter reproduced ' + target + ' exactly.');
-    say('');
-    say('Read the ·measure· rows: they show how many cancelled, paused,');
-    say('suspended and skipped rows the day holds. If the unfiltered count');
-    say('minus some combination of those lands on your target, the dashboard');
-    say('is excluding exactly that set — send me this log and I will add it.');
-    say('');
-    say('Do not run the sync until this is settled. A delivery count that');
-    say('silently includes cancellations is worse than no count at all,');
-    say('because it also divides into every per-delivery cost figure.');
+    say('NEXT: caloPreviewSync()   then   caloSyncDeliveries()');
   } else {
-    say('Run it again with the figure your dashboard shows for ' + ymd + ', e.g.');
-    say('  caloProbeStatuses(\'' + ymd + '\', 5321)');
+    say('NOTHING MATCHED ALL ' + days.length + ' DAYS — nothing has been saved,');
+    say('and the sync stays blocked.');
+    if (best) say('Closest was "' + best.label + '" at ' + bestScore + '/' + days.length + '.');
+    say('');
+    say('Send me this log. The breakdown above says how many rows each group');
+    say('holds, so the right combination can be worked out from it rather than');
+    say('guessed at a third time.');
   }
 
   var text = out.join('\n');
   Logger.log(text);
   return text;
+}
+
+function _caloPadLeft_(s, w) {
+  s = String(s);
+  while (s.length < w) s = ' ' + s;
+  return s;
 }
 
 /** Sets the filter by hand, if we work it out from the measurements. */
@@ -440,13 +482,17 @@ function _caloSheetIndex_() {
 // ── 3 & 4. PREVIEW AND SYNC ─────────────────────────────────
 
 /** Shows exactly what a sync would change. Writes nothing. */
-function caloPreviewSync(daysBack) { return _caloSync_(daysBack, true); }
+function caloPreviewSync(daysBack, daysForward) { return _caloSync_(daysBack, daysForward, true); }
 
 /** Writes the API's counts into the DELIVERIES tab. Touches no other tab. */
-function caloSyncDeliveries(daysBack) { return _caloSync_(daysBack, false); }
+function caloSyncDeliveries(daysBack, daysForward) { return _caloSync_(daysBack, daysForward, false); }
 
-function _caloSync_(daysBack, previewOnly) {
-  daysBack = Number(daysBack) || 7;
+function _caloSync_(daysBack, daysForward, previewOnly) {
+  daysBack    = (daysBack    === 0 || daysBack)    ? Number(daysBack)    : 7;
+  // Two days ahead by default, matching Today's DPD and Tomorrow's DPD on
+  // the Calo dashboard. Those days are not guesswork: the deliveries exist
+  // and are counted, they simply have not been dispatched yet.
+  daysForward = (daysForward === 0 || daysForward) ? Number(daysForward) : 2;
   var props = PropertiesService.getScriptProperties();
   var style = props.getProperty('CALO_QS_STYLE');
   var extra = _caloExtraFilter_();
@@ -471,10 +517,10 @@ function _caloSync_(daysBack, previewOnly) {
     say('STOP: it has not been settled which rows count as a delivery.');
     say('');
     say('      Unfiltered, this endpoint also counts cancelled, skipped,');
-    say('      paused and suspended deliveries — about 400–580 a day for UAE.');
+    say('      paused and suspended deliveries — about 300–500 a day for UAE.');
     say('');
-    say('      Run:  caloProbeStatuses(\'2026-11-05\', 5321)');
-    say('      using a day and the figure your dashboard shows for it.');
+    say('      Run:  caloFindFilter()');
+    say('      It tests every filter against the figures in CALO_TRUTH.');
     Logger.log(out.join('\n'));
     return out.join('\n');
   }
@@ -488,10 +534,11 @@ function _caloSync_(daysBack, previewOnly) {
 
   var written = 0, skipped = 0, failed = 0;
 
-  // Today and backwards only. Dates ahead of today hold the operation's
-  // PLANNED figures, typed from the DPD board, and they are not this
-  // endpoint's to overwrite — it reports what exists, not what is intended.
-  for (var i = daysBack; i >= 0; i--) {
+  // Backwards from today, then forward by daysForward. The forward days
+  // replace the DPD board figures that were typed in by hand, which is the
+  // point: the API reports the same deliveries the board does, without
+  // anyone retyping them.
+  for (var i = daysBack; i >= -daysForward; i--) {
     var ds   = _caloShiftDays_(today, -i);
     var cell = idx.cells[ds];
     var now  = idx.values.hasOwnProperty(ds) ? idx.values[ds] : null;
@@ -557,13 +604,13 @@ function _caloSync_(daysBack, previewOnly) {
 function caloInstallDailySync() {
   if (!_caloExtraFilter_()) {
     throw new Error('Settle which rows count as a delivery first — run ' +
-                    'caloProbeStatuses(). An unattended job must not be the thing ' +
+                    'caloFindFilter(). An unattended job must not be the thing ' +
                     'that decides that question.');
   }
   caloRemoveDailySync();
   ScriptApp.newTrigger('caloDailySyncRun').timeBased().atHour(6).everyDays(1).create();
   var msg = 'Daily sync installed: caloDailySyncRun, about 06:00 ' +
-            Session.getScriptTimeZone() + ', re-checking the last 7 days each run.';
+            Session.getScriptTimeZone() + ', re-checking the last 7 days and the next 2 each run.';
   Logger.log(msg);
   return msg;
 }
@@ -583,4 +630,4 @@ function caloRemoveDailySync() {
  * this takes no argument and passes its own — calling caloSyncDeliveries
  * straight from a trigger would read that event as daysBack.
  */
-function caloDailySyncRun() { return caloSyncDeliveries(7); }
+function caloDailySyncRun() { return caloSyncDeliveries(7, 2); }
