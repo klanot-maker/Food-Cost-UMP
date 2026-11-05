@@ -171,8 +171,10 @@ function cfgSelfTest() {
   // per month, and those names differ by market, so only that it opens
   // is checked here.
   var want = {
-    financial:  ['Financial cost', 'Access Control'],
-    complaints: ['CAPACITY', 'DELIVERIES', 'DOD Complaint', 'MOM Complaints', 'Logistics'],
+    financial:  ['Access Control'],
+    complaints: ['CAPACITY', 'DELIVERIES', 'DISTRICT DELIVERIES', 'WOW DISTRICT',
+                 'DOD Complaint', 'MOM Complaints', 'Logistics', 'FORECAST',
+                 'UPDATES', 'DISTRICT SHIFTS', 'LOGISTICS INVOICES'],
     staff:      []
   };
   var seenIds = {};
@@ -203,6 +205,27 @@ function cfgSelfTest() {
                 'section will show nothing with no error.');
     });
   });
+
+  // --- which tab the financial reader will actually use ---------
+  // getFinancialData asks for a tab called 'Financial cost' and SILENTLY
+  // FALLS BACK to the first tab in the workbook when it is missing. UAE
+  // relies on that fallback — its tab is called 'Summary'. The fallback is
+  // why a market with a differently-ordered workbook can read the wrong tab
+  // and show plausible-looking nonsense, so it is named explicitly here.
+  out.push('');
+  try {
+    var ssF   = SpreadsheetApp.openById(_cfgId_('financial'));
+    var named = ssF.getSheetByName('Financial cost');
+    if (named) {
+      pass('Financial figures will be read from tab "Financial cost".');
+    } else {
+      var first = ssF.getSheets()[0];
+      warn('No tab called "Financial cost" — the reader falls back to the FIRST tab, ' +
+           'which here is "' + first.getName() + '". Check that is the one holding ' +
+           'revenue, wastage and other cost. If it is not, rename the correct tab ' +
+           'to "Financial cost".');
+    }
+  } catch (e) { fail('Could not determine the financial tab: ' + e.message); }
 
   // --- the DOD gid ---------------------------------------------
   out.push('');
