@@ -68,6 +68,13 @@
 // two ahead. They used to take days, so a stale caloSyncDeliveries(7, 2) is
 // refused rather than read as seven weeks.
 //
+// A month's dates can sit in any column — December is the twelfth pair, W
+// and X — because each date is looked up where it actually is. A new YEAR
+// is different: those rows do not exist until someone makes them, so the
+// sync builds the block itself when the window first reaches it, copied
+// from the year above so the colours and the date format match. To lay a
+// year out early, run caloEnsureYear(2027).
+//
 // Nothing here touches any tab other than DELIVERIES.
 // ============================================================
 
@@ -659,6 +666,211 @@ function _caloSheetIndex_() {
 }
 
 
+// ── growing the tab into a new year ─────────────────────────
+//
+// The tab is a stack of year blocks: a green heading row, then thirty-one
+// rows of dates, twelve month column-pairs wide. 2026's heading is on row
+// 133 and its dates run 134 → 164; December lives in the twelfth pair, W
+// and X. Because the index above goes looking for each date rather than
+// working out where it ought to sit, which column a month occupies has
+// never mattered — December reads exactly like January.
+//
+// The year boundary is different, because the row genuinely is not there.
+// The forward week first crosses it on Sunday 20 December 2026: the week
+// Dec 27 → Jan 2 is the first window containing a January date. Without a
+// 2027 block every one of those days would be reported as "no row for this
+// date" and skipped, and from January the sync would write nothing at all.
+//
+// So the sync builds the block itself. It is a straight copy of the
+// previous year's — the green, the borders, the alignment and the
+// mmm d, yy ddd  date format all come across as they are — and then the
+// dates are rewritten for the new year and the counts left blank for the
+// sync to fill.
+
+var _CALO_MONTH_ROWS = 31;      // the longest month, so every block is 31 rows
+var _CALO_BLOCK_COLS = 24;      // twelve months, a date and a count each
+
+/** Days in a month. month is 0-based, as JavaScript counts them. */
+function _caloDaysInMonth_(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+/** The last row holding anything at all. */
+function _caloLastUsedRow_(all) {
+  for (var r = all.length - 1; r >= 0; r--) {
+    for (var c = 0; c < all[r].length; c++) {
+      if (all[r][c] !== '' && all[r][c] !== null) return r + 1;
+    }
+  }
+  return 0;
+}
+
+/** The newest year the tab has any date at all in. */
+function _caloNewestYear_(idx) {
+  var best = 0;
+  for (var ds in idx.cells) {
+    var y = Number(ds.substring(0, 4));
+    if (y > best) best = y;
+  }
+  return best;
+}
+
+/** How wide a block is, measured rather than assumed. */
+function _caloBlockWidth_(all, firstRow) {
+  var last = 0;
+  for (var r = firstRow - 1; r < firstRow - 1 + _CALO_MONTH_ROWS && r < all.length; r++) {
+    var row = all[r] || [];
+    for (var c = row.length - 1; c >= 0; c--) {
+      if (row[c] !== '' && row[c] !== null) { if (c + 1 > last) last = c + 1; break; }
+    }
+  }
+  if (last % 2) last++;                                   // a date always has its count
+  return Math.max(2, Math.min(last, _CALO_BLOCK_COLS));
+}
+
+/** The one cell in a heading row that carries the text. */
+function _caloTitleCol_(all, titleRow, width) {
+  var row = all[titleRow - 1] || [];
+  for (var c = 0; c < width; c++) {
+    if (row[c] !== '' && row[c] !== null && row[c] !== undefined) return c + 1;
+  }
+  return 0;
+}
+
+/** Copies one year block to the bottom of the tab and re-dates it. */
+function _caloAddYear_(idx, newYear, templateYear) {
+  var sheet = idx.sheet;
+  var jan1  = idx.cells[templateYear + '-01-01'];
+  if (!jan1) {
+    throw new Error('The ' + templateYear + ' block has no 1 January row, so there is no ' +
+                    'complete year to copy the layout from. Nothing was changed.');
+  }
+  var tmplFirst = jan1.row;
+  var tmplTitle = tmplFirst - 1;
+  if (tmplTitle < 1) {
+    throw new Error('The ' + templateYear + ' block starts on row 1, so it has no heading row ' +
+                    'to copy. Nothing was changed.');
+  }
+
+  var all      = sheet.getDataRange().getValues();
+  var width    = _caloBlockWidth_(all, tmplFirst);
+  var lastUsed = _caloLastUsedRow_(all);
+
+  var newTitle = lastUsed + 2;                  // one blank row between blocks, as above
+  var newFirst = newTitle + 1;
+  var needRows = newFirst + _CALO_MONTH_ROWS - 1;
+  if (needRows > sheet.getMaxRows()) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), needRows - sheet.getMaxRows());
+  }
+  if (width > sheet.getMaxColumns()) {
+    throw new Error('The tab is only ' + sheet.getMaxColumns() + ' columns wide but a year ' +
+                    'block needs ' + width + '. Nothing was changed.');
+  }
+
+  // 1. The look, taken whole from last year so nothing has to be described.
+  sheet.getRange(tmplTitle, 1, _CALO_MONTH_ROWS + 1, width)
+       .copyTo(sheet.getRange(newTitle, 1, _CALO_MONTH_ROWS + 1, width));
+
+  // 2. The heading.
+  var titleCol = _caloTitleCol_(all, tmplTitle, width);
+  if (titleCol) sheet.getRange(newTitle, titleCol).setValue(newYear + ' DELIVERIES');
+
+  // 3. The dates — and blank counts, because the copy brought last year's
+  //    figures with it and those must not survive a single moment.
+  var rows = [];
+  for (var d = 1; d <= _CALO_MONTH_ROWS; d++) {
+    var row = [];
+    for (var m = 0; m * 2 < width; m++) {
+      if (m < 12 && d <= _caloDaysInMonth_(newYear, m)) row.push(new Date(newYear, m, d), '');
+      else                                              row.push('', '');
+    }
+    rows.push(row);
+  }
+  sheet.getRange(newFirst, 1, _CALO_MONTH_ROWS, width).setValues(rows);
+
+  return newYear + ': heading row ' + newTitle + ', dates rows ' + newFirst + ' → ' +
+         (newFirst + _CALO_MONTH_ROWS - 1) + ', copied from ' + templateYear;
+}
+
+/** Adds every year block needed to reach `year`, oldest first. */
+function _caloGrowTo_(year) {
+  var lines = [], guard = 0;
+  while (guard++ < 12) {
+    var idx = _caloSheetIndex_();
+    if (idx.cells[year + '-01-01']) break;
+    var newest = _caloNewestYear_(idx);
+    if (!newest) {
+      throw new Error('The DELIVERIES tab has no year block to copy from, so there is no ' +
+                      'format to follow. Nothing was changed.');
+    }
+    if (year <= newest) {
+      // Older than something already in the tab: a gap someone made, not a
+      // year that has yet to arrive. Inventing rows in the middle of
+      // someone else's history is not this function's business.
+      lines.push(year + ' is older than the ' + newest + ' block already in the tab — ' +
+                 'left alone. Add it by hand if it is really wanted.');
+      break;
+    }
+    lines.push(_caloAddYear_(idx, newest + 1, newest));
+  }
+  return lines;
+}
+
+/**
+ * Builds a year block by hand: caloEnsureYear(2027).
+ *
+ * The sync does this on its own when the window reaches a new year, so
+ * this is only for doing it early — to see the block before January, or
+ * to lay out several years at once.
+ */
+function caloEnsureYear(year) {
+  var y = Number(year);
+  if (!y || y < 2000 || y > 2100 || y !== Math.floor(y)) {
+    throw new Error('caloEnsureYear needs a four-digit year, e.g. caloEnsureYear(2027).');
+  }
+  var idx = _caloSheetIndex_();
+  if (idx.cells[y + '-01-01']) {
+    var msg = y + ' is already in the DELIVERIES tab — nothing to do.';
+    Logger.log(msg);
+    return msg;
+  }
+  var out = ['GROWING THE DELIVERIES TAB  (' + new Date() + ')', ''].concat(_caloGrowTo_(y));
+  Logger.log(out.join('\n'));
+  return out.join('\n');
+}
+
+/** Whatever year blocks this window needs but the tab has not got. */
+function _caloGrowForWindow_(days, previewOnly) {
+  var years = [], seen = {};
+  days.forEach(function(ds) {
+    var y = Number(ds.substring(0, 4));
+    if (!seen[y]) { seen[y] = true; years.push(y); }
+  });
+  years.sort();
+
+  var lines = [];
+  years.forEach(function(y) {
+    var idx = _caloSheetIndex_();
+    if (idx.cells[y + '-01-01']) return;
+    var newest = _caloNewestYear_(idx);
+    if (y <= newest) return;                    // a gap, not a new year — see above
+    if (previewOnly) {
+      lines.push('The window reaches ' + y + ', which has no block yet. A sync would add ' +
+                 'one, copied from ' + newest + '.');
+      return;
+    }
+    // A tab that cannot be grown is a reason to say so, not a reason to
+    // abandon the fifteen days that do have rows.
+    try {
+      lines = lines.concat(_caloGrowTo_(y));
+    } catch (e) {
+      lines.push('could not add ' + y + ': ' + e.message);
+    }
+  });
+  return lines;
+}
+
+
 // ── 3 & 4. PREVIEW AND SYNC ─────────────────────────────────
 
 /**
@@ -748,15 +960,25 @@ function _caloSync_(weeksBack, weeksForward, previewOnly) {
     return out.join('\n');
   }
 
-  var idx   = _caloSheetIndex_();
   var today = _caloToday_();
   var days  = _caloDayList_(weeksBack, weeksForward);
+
+  // A window crossing New Year needs rows that nobody has typed yet. Build
+  // them before going looking, or every January day reads as "no row for
+  // this date" and the sync quietly stops working on the 1st.
+  var grew = _caloGrowForWindow_(days, previewOnly);
+
+  var idx   = _caloSheetIndex_();
 
   say('Kitchen: ' + _caloKitchen_() + '    Counting: ' + JSON.stringify(extra));
   say('Window:  ' + days[0] + ' (Sun) → ' + days[days.length - 1] + ' (Sat)   ' +
       days.length + ' days, ' + (weeksBack + weeksForward + 1) + ' whole weeks');
   say('Today:   ' + today + ' (' + _CALO_DOW[_caloDow_(today)] + ')   ' +
       'anything after this is a forecast and will be revised daily');
+  if (grew.length) {
+    say('');
+    grew.forEach(function(line) { say('New year: ' + line); });
+  }
   say('');
   say('      date            sheet now  API     action');
 
