@@ -608,11 +608,10 @@ function getComplaintsData(ss) {
     var sheets = ss.getSheets();
 
     // ── 1. Read MOM Complaints for targets (row 1) and per-month rates ──
-    var momSheet = null;
-    for (var si = 0; si < sheets.length; si++) {
-      if (sheets[si].getSheetId() === 1266592099) { momSheet = sheets[si]; break; }
-    }
-    if (!momSheet) momSheet = ss.getSheetByName('MOM Complaints');
+    // Found by name. The UAE copy looks up a hardcoded tab id first; tab ids
+    // are per-workbook, so in any other workbook that either finds nothing or,
+    // worse, finds whatever tab happens to hold that id.
+    var momSheet = ss.getSheetByName('MOM Complaints');
 
     var targets = { fo: 0.007, ql: 0.003, sl: 0.002, dp: 0.005, le: 0.008 };
     var momRates = {}; // "Month YYYY" => {foPct, qlPct, slPct, dpPct, lePct}
@@ -924,12 +923,12 @@ function getStaffSummaryData(ss) {
 function updateComplaintsValue(monthLabel, field, value) {
   try {
     var ss     = SpreadsheetApp.openById(SS_COMPLAINTS_());
-    var sheet  = null;
-    var sheets = ss.getSheets();
-    for (var i = 0; i < sheets.length; i++) {
-      if (sheets[i].getSheetId() === 1266592099) { sheet = sheets[i]; break; }
-    }
-    if (!sheet) sheet = ss.getSheetByName('MOM Complaints') || sheets[0];
+    // By name only, and no falling back to the first tab in the workbook.
+    // This function WRITES. Reading the wrong tab shows a wrong number;
+    // writing to the wrong tab puts one there permanently.
+    var sheet = ss.getSheetByName('MOM Complaints');
+    if (!sheet) throw new Error('No tab called "MOM Complaints" in the operations ' +
+                                'workbook, so there is nowhere to save this. Nothing was changed.');
 
     var COL = { fo:2, ql:3, hr:4, sl:5, cs:6, dp:7, le:8 };
     var col = COL[field];
@@ -959,20 +958,19 @@ function updateComplaintsValue(monthLabel, field, value) {
 function updateStaffValue(sheetName, deptName, dateStr, field, value) {
   try {
     var ss    = SpreadsheetApp.openById(SS_STAFF_());
-    var sheet = sheetName ? ss.getSheetByName(sheetName) : null;
-
+    // The UAE copy falls back to a hardcoded tab id, then to any tab with
+    // "June" in its name, then to the first tab in the workbook. Those are
+    // three ways to write a staff figure into the wrong month in a workbook
+    // whose tab names this market chose. The month is known at the point the
+    // edit is made, so it is required.
+    if (!sheetName) {
+      throw new Error('updateStaffValue was not told which month tab to write to. ' +
+                      'Nothing was changed.');
+    }
+    var sheet = ss.getSheetByName(sheetName);
     if (!sheet) {
-      var sheets = ss.getSheets();
-      for (var i = 0; i < sheets.length; i++) {
-        if (sheets[i].getSheetId() === 773931869) { sheet = sheets[i]; break; }
-      }
-      if (!sheet) {
-        for (var j = 0; j < sheets.length; j++) {
-          var n = sheets[j].getName().toLowerCase();
-          if (n.indexOf('june') > -1 || n.indexOf('jun') > -1) { sheet = sheets[j]; break; }
-        }
-      }
-      if (!sheet) sheet = ss.getSheets()[0];
+      throw new Error('No tab called "' + sheetName + '" in the staff workbook. ' +
+                      'Nothing was changed.');
     }
 
     var COL = { on:3, off:4, al:5, sl:6, sup:7, del:10 };

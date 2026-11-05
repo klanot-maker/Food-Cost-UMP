@@ -59,10 +59,44 @@ single most common reason a new market's dashboard looks half-broken.
 `June : 2026`), so nothing checks them; the dashboard reads whichever tabs are
 there.
 
-The quickest way to get the structure right is to ask the UAE owner for a copy
-of their workbooks with the data cleared, rather than building the tabs by
-hand from this list. The column layouts matter as much as the tab names, and
-they are not written down anywhere.
+### Getting the structure without inheriting the data
+
+**Do not build these tabs by hand from the list above.** The column layouts
+matter as much as the tab names — which column holds "Spilled", which row
+holds the targets — and they are not written down anywhere except in the
+sheets themselves. A tab with the right name and the wrong columns reads as
+zeros, silently.
+
+Copy, then empty:
+
+1. Ask the UAE owner to open each workbook and do **File → Make a copy**.
+2. They share the copy with you, or move it into your market's folder.
+3. **In your copy**, clear the data but keep the structure:
+
+| Tab | Delete | Keep |
+|---|---|---|
+| `Financial cost` | every month column except the labels in column A | column A, and the row order — the reader finds the wastage and other-cost blocks by walking down the labels |
+| `MOM Complaints` | every row from row 2 down | **row 1** — it holds the complaint targets, not a header |
+| `DOD Complaint` | every data row | the header row |
+| `CAPACITY`, `Logistics`, `FORECAST`, `DISTRICT DELIVERIES`, `WOW DISTRICT`, `DISTRICT SHIFTS` | every data row | the header row |
+| `DELIVERIES` | **nothing** — see below | everything |
+| `Access Control` | every row | the header row, then add yourself |
+| `UPDATES`, `Comments` | every row | the header row |
+| staff month tabs | all but one month, and the rows inside it | one tab as the shape to copy for your own months |
+
+`DELIVERIES` is the exception. Its year blocks are dates with no numbers in
+them until the sync runs, so **delete the count column only and leave the
+dates**. If you delete the year blocks too, `caloEnsureYear()` can rebuild
+them — but it copies the layout from a year that is already there, so leave
+at least one.
+
+Nothing in the scripts reads a cell by its position in UAE's file. Everything
+is found by tab name, by header text, or by walking the labels in column A.
+That is why clearing the numbers is enough and no re-mapping is needed.
+
+4. Check you cleared everything: open each tab and look for a figure you
+   recognise as UAE's. Then run `cfgSelfTest()` — it will not catch leftover
+   data, but it will catch a tab you renamed or deleted by accident.
 
 ---
 
@@ -202,6 +236,13 @@ with nothing to suggest they were not.
 
 The same goes for `CALO_TRUTH`, which is UAE's delivery counts, and for every
 spreadsheet id in `Config.gs`.
+
+Three tab lookups also changed. The UAE copy finds `MOM Complaints` and one
+staff tab by hardcoded tab id, falling back to a tab named after June, then
+to the first tab in the workbook. Tab ids belong to the workbook they were
+created in, and two of those lookups **write** — so in your workbook they
+were three ways to save a figure into the wrong month. The template finds
+tabs by name, and refuses rather than guessing.
 
 ---
 
