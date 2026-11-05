@@ -45,10 +45,12 @@ file — put the same id in all three slots.
 | staff | one tab per month, e.g. `October : 2026` | Manpower |
 
 **The financial reader falls back to the first tab in the workbook when no tab
-is called `Financial cost`.** UAE runs on that fallback — its tab is named
-`Summary`. The fallback is silent, so a market whose workbook opens on some
-other tab will show figures that look plausible and are wrong. `cfgSelfTest()`
-names the tab that will really be read.
+is called `Financial cost`.** UAE ran on that fallback for a long time — its
+tab was named `Summary`, and was renamed in November 2026 so the lookup now
+succeeds by name. The fallback is silent, so a market whose workbook opens on
+some other tab will show figures that look plausible and are wrong. Every
+market should name the tab rather than rely on ordering; `cfgSelfTest()` reports
+which tab will really be read.
 
 Month tabs are matched as `/^([A-Za-z]+)\s*:\s*(\d{4})$/`, so both
 `October : 2026` and `January: 2026` are accepted.

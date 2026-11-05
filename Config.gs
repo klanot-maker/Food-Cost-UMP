@@ -208,10 +208,12 @@ function cfgSelfTest() {
 
   // --- which tab the financial reader will actually use ---------
   // getFinancialData asks for a tab called 'Financial cost' and SILENTLY
-  // FALLS BACK to the first tab in the workbook when it is missing. UAE
-  // relies on that fallback — its tab is called 'Summary'. The fallback is
-  // why a market with a differently-ordered workbook can read the wrong tab
-  // and show plausible-looking nonsense, so it is named explicitly here.
+  // FALLS BACK to the first tab in the workbook when it is missing. UAE's
+  // tab was called 'Summary' and ran on that fallback for a long time; it
+  // was renamed in November 2026 so the lookup now succeeds by name. The
+  // fallback remains the reason a market whose workbook opens on some other
+  // tab can read it and show plausible-looking nonsense, so the tab that
+  // will really be used is named explicitly here.
   out.push('');
   try {
     var ssF   = SpreadsheetApp.openById(_cfgId_('financial'));
