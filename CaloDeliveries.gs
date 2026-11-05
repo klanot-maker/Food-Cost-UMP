@@ -504,6 +504,116 @@ function _caloPadLeft_(s, w) {
   return s;
 }
 
+/**
+ * Does the saved filter still describe OLD days? Writes nothing.
+ *
+ *   caloCheckHistory()        samples 8 settled days across the whole tab
+ *   caloCheckHistory(20)      samples more
+ *
+ * WHY THIS IS NOT OBVIOUS
+ * The filter is `status = [upcoming, paymentRequired]`, and "upcoming" is a
+ * state a delivery is supposed to LEAVE once it has happened. It reproduces
+ * the first week of November exactly, so the status evidently sticks around
+ * for recent days — but whether it still holds for a day in 2022 is a
+ * different question, and four years is plenty of time for a schema to have
+ * been migrated underneath it.
+ *
+ * So this asks the API about days the sheet already knows the answer to. If
+ * the figures come back matching, the filter describes history as well as it
+ * describes this week. If they come back near zero, it does not, and no
+ * backfill should go anywhere near the historical blocks.
+ *
+ * Either way the answer is read off, not assumed.
+ */
+function caloCheckHistory(sampleSize) {
+  var want  = Math.max(2, Number(sampleSize) || 8);
+  var extra = _caloExtraFilter_();
+  if (!extra) throw new Error('Run caloFindFilter() first — there is no filter to check.');
+
+  var idx   = _caloSheetIndex_();
+  var today = _caloToday_();
+
+  // Only settled days that the sheet has a real figure for: a blank or a
+  // zero gives nothing to compare against.
+  var settled = Object.keys(idx.cells).filter(function(ds) {
+    return ds < today && idx.values[ds] > 0;
+  }).sort();
+
+  var out = [];
+  function say(s) { out.push(s); }
+
+  say('DOES THE FILTER DESCRIBE HISTORY?  (' + new Date() + ')');
+  say('');
+  if (!settled.length) {
+    say('The tab holds no settled day with a count, so there is nothing to check.');
+    Logger.log(out.join('\n'));
+    return out.join('\n');
+  }
+
+  say('Kitchen: ' + _caloKitchen_() + '    Counting: ' + JSON.stringify(extra));
+  say('History in the tab: ' + settled[0] + ' → ' + settled[settled.length - 1] +
+      '   (' + settled.length + ' days with a figure)');
+  say('');
+
+  // An even spread across the whole range, so a verdict is not drawn from
+  // one corner of it.
+  var picks = [], seen = {};
+  for (var i = 0; i < want; i++) {
+    var ds = settled[Math.round(i * (settled.length - 1) / (want - 1))];
+    if (!seen[ds]) { seen[ds] = true; picks.push(ds); }
+  }
+
+  say('   date         sheet     API      difference');
+  var matched = 0, nearZero = 0, failed = 0;
+
+  picks.forEach(function(ds) {
+    var have = idx.values[ds];
+    var c    = _caloCountFor_(ds, extra);
+    if (!c.ok) {
+      say('   ' + ds + '   ' + _caloPadLeft_(have, 7) + '   ' +
+          _caloPadLeft_('err', 6) + '   ' + c.why.substring(0, 60));
+      failed++;
+      return;
+    }
+    var diff = c.count - have;
+    var pct  = have ? Math.round(diff * 1000 / have) / 10 : 0;
+    if (diff === 0) matched++;
+    // "Near zero" means the API has essentially nothing for that day, which
+    // is the signature of a status filter that no longer applies.
+    if (c.count < have * 0.1) nearZero++;
+    say('   ' + ds + '   ' + _caloPadLeft_(have, 7) + '   ' + _caloPadLeft_(c.count, 6) +
+        '   ' + _caloPadLeft_((diff > 0 ? '+' : '') + diff, 7) +
+        (have ? '  (' + (pct > 0 ? '+' : '') + pct + '%)' : ''));
+  });
+
+  say('');
+  say(matched + ' of ' + picks.length + ' matched exactly.');
+  say('');
+
+  if (failed === picks.length) {
+    say('Every call failed. This is about the API or the key, not about history —');
+    say('run caloDiagnose().');
+  } else if (matched === picks.length) {
+    say('THE FILTER DESCRIBES HISTORY TOO.');
+    say('A backfill would be safe as far as the numbers go. Whether it is worth');
+    say('doing is a separate question — see the note above caloBackfillPlan().');
+  } else if (nearZero >= picks.length - failed - 1) {
+    say('THE FILTER DOES NOT DESCRIBE OLD DAYS.');
+    say('The API has almost nothing for them, which is what it looks like when a');
+    say('status a delivery is meant to leave has finally been left. Do not');
+    say('backfill: it would replace years of good record with near-zeros.');
+  } else {
+    say('MIXED. The filter fits some days and not others, so there is probably a');
+    say('date after which the data behaves one way and before which it behaves');
+    say('another. Send me this log and I will find the boundary.');
+  }
+
+  var text = out.join('\n');
+  Logger.log(text);
+  return text;
+}
+
+
 /** Sets the filter by hand, if we work it out from the measurements. */
 function caloSetFilter(jsonText) {
   var obj;

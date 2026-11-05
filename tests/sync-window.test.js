@@ -165,5 +165,44 @@ const blocked = _caloSync_(1, 1, false);
 t('no filter = no writes',           written.length, 0);
 t('and says why',                    /which rows count as a delivery/.test(blocked), true);
 
+
+
+// ── caloCheckHistory: read-only, and reads the verdict off the data ──
+// The guard test above cleared the filter; put it back.
+props.CALO_DLV_FILTER = JSON.stringify({ skipped: false, status: ['upcoming', 'paymentRequired'] });
+// Fixture: the tab's older blocks. 2022 rows 2-32, 2026 rows 134-164.
+for (let d = 1; d <= 31; d++) { grid[1 + d - 1][0] = new Date(2022, 0, d); grid[1 + d - 1][1] = 200 + d; }
+
+written.length = 0;
+let hApi = day => 0;                                   // the API has nothing for old days
+global.UrlFetchApp = { fetch: u => {
+  const day = (decodeURIComponent(u).match(/filters\[day\]\[gte\]=(\d{4}-\d{2}-\d{2})/) || [])[1];
+  return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ count: hApi(day), cost: [] }) };
+}};
+let hist = caloCheckHistory(6);
+t('history check writes nothing',    written.length, 0);
+t('spots a filter that misses old',  /DOES NOT DESCRIBE OLD DAYS/.test(hist), true);
+t('and says not to backfill',        /Do not\s+backfill/.test(hist), true);
+
+// Now the API agrees with the sheet. Read the figure back out of the grid
+// rather than recomputing it: the sync above has already rewritten three
+// weeks of it, so any formula here would describe the fixture as it was
+// built, not as it now stands.
+const sheetVal = day => {
+  for (let r = 0; r < grid.length; r++)
+    for (let c = 0; c + 1 < grid[r].length; c += 2)
+      if (grid[r][c] instanceof Date && _dlvYmd_(grid[r][c]) === day) return Number(grid[r][c + 1]) || 0;
+  return 0;
+};
+hApi = sheetVal;
+hist = caloCheckHistory(6);
+t('spots a filter that does match',  /DESCRIBES HISTORY TOO/.test(hist), true);
+t('counts the matches',              /6 of 6 matched exactly/.test(hist), true);
+
+hApi = day => day.startsWith('2022') ? 0 : sheetVal(day);
+hist = caloCheckHistory(6);
+t('spots a mixed result',            /MIXED/.test(hist), true);
+t('never samples a future day',      hist.indexOf('2026-11-06') , -1);
+
 console.log('\n  ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

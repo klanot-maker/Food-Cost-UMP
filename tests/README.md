@@ -8,6 +8,8 @@ shipped file changes, these run against the change.
     node tests/filter.test.js        # which rows count as a delivery
     node tests/sync-window.test.js   # the Sunday-to-Saturday window
 
+`sync-window.test.js` also covers `caloCheckHistory()`, which is read-only.
+
 `filter.test.js` pins the request format and proves `caloFindFilter()` picks
 the dashboard's own filter — `skipped=false`, `status=[upcoming,
 paymentRequired]` — over the ten alternatives, rather than landing on it by
