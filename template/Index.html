@@ -115,6 +115,11 @@ body{margin:0;background:#FFFFFF;color:var(--txt);min-height:100vh;}
 /* Controls sit on green: inline styles need !important to be overridden */
 .topbar #refreshBtn{background:rgba(255,255,255,0.16)!important;border:1.5px solid rgba(255,255,255,0.45)!important;color:#fff!important;}
 .topbar #refreshBtn:hover{background:rgba(255,255,255,0.28)!important;}
+/* The Download button sits on the green bar, so it borrows Refresh's
+   translucent-white treatment rather than the solid green it has elsewhere —
+   green on green reads as a gap. */
+.topbar .dl-btn{background:rgba(255,255,255,0.16);border:1.5px solid rgba(255,255,255,0.45);color:#fff;box-shadow:none;padding:6px 12px;font-size:12px;font-weight:600;font-family:'Lato',sans-serif;}
+.topbar .dl-btn:hover{background:rgba(255,255,255,0.28);}
 
 /* ── CALENDAR BUTTON ── */
 .fw{position:relative;}
@@ -1155,6 +1160,18 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
         <span class="role-badge" id="topbarRoleBadge"></span>
       </div>
       <button id="refreshBtn" onclick="refreshData()" title="Refresh now" style="background:none;border:1.5px solid var(--border);border-radius:var(--rs);padding:6px 11px;font-size:12px;font-weight:600;color:var(--mut);cursor:pointer;font-family:'Lato',sans-serif;transition:border-color .15s;" onmouseover="this.style.borderColor='var(--br)'" onmouseout="this.style.borderColor='var(--border)'">⟳ Refresh</button>
+      <!-- One Download button for the whole dashboard. It exports whichever
+           page is open, so it does not have to be repeated six times and a
+           page added later gets it without being wired up. -->
+      <div style="position:relative;">
+        <button class="dl-btn" id="dlBtnTop" onclick="toggleDlMenu()" title="Download this page">
+          <i class="ti ti-download"></i> Download <i class="ti ti-chevron-down" style="font-size:11px;"></i>
+        </button>
+        <div class="dl-menu" id="dlMenu">
+          <div class="dl-item" onclick="downloadActiveExcel()"><i class="ti ti-file-spreadsheet"></i> Excel (.xlsx)</div>
+          <div class="dl-item" onclick="downloadActivePdf()"><i class="ti ti-file-text"></i> PDF (.pdf)</div>
+        </div>
+      </div>
     <div class="fw">
       <button class="dtb" id="dtBtn" onclick="toggleCal()">
         <i class="ti ti-calendar"></i>
@@ -1203,15 +1220,9 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
 
     <!-- PAGE: FINANCIAL COST -->
     <div class="page active" id="page-financial">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:14px;position:relative;">
-        <button class="dl-btn" onclick="toggleDlMenu()" id="dlBtnFin">
-          <i class="ti ti-download"></i> Download <i class="ti ti-chevron-down" style="font-size:11px;"></i>
-        </button>
-        <div class="dl-menu" id="dlMenu">
-          <div class="dl-item" onclick="downloadFinancialExcel()"><i class="ti ti-file-spreadsheet"></i> Excel (.xlsx)</div>
-          <div class="dl-item" onclick="downloadFinancialPdf()"><i class="ti ti-file-text"></i> PDF (.pdf)</div>
-        </div>
-      </div>
+      <!-- The Download button that used to sit here has moved to the top bar,
+           where it is on every page. Financial's own export is unchanged — the
+           top-bar button calls it. -->
       <div class="kpi-row kpi-6" id="finKpiRow"></div>
       <div class="two-col">
         <div class="chart-card">
@@ -6161,10 +6172,10 @@ function doResetWithToken(){
 // ════════════════════════════════════════════════════════════
 function toggleDlMenu(){
   var m=document.getElementById('dlMenu');
-  m.classList.toggle('open');
+  if(m) m.classList.toggle('open');
 }
 document.addEventListener('click',function(e){
-  var btn=document.getElementById('dlBtnFin');
+  var btn=document.getElementById('dlBtnTop');
   var menu=document.getElementById('dlMenu');
   if(menu && btn && !btn.contains(e.target) && !menu.contains(e.target)){
     menu.classList.remove('open');
@@ -6390,6 +6401,282 @@ function downloadFinancialPdf(){
   doc.text('CALO KMP Operation Dashboard',14,pgH-6);
 
   doc.save('Financial_Cost_'+d.periodLbl.replace(/[^a-zA-Z0-9]/g,'_')+'.pdf');
+}
+
+// ════════════════════════════════════════════════════════════
+// PAGE EXPORT — Excel + PDF for whichever page is open
+// ════════════════════════════════════════════════════════════
+// Financial builds its export from DATA.financial, because it reports
+// per-category growth that is nowhere on the screen. That one is untouched.
+//
+// The other five are exported from what is actually rendered. A second code
+// path reading the raw data again would be five more things to keep in step
+// with the pages, and the first time one drifted the file would quietly
+// disagree with the screen it was downloaded from. Reading the DOM means the
+// export carries the date range, the month picker and any filter already
+// applied, for free — and a page added later is covered without being wired
+// up.
+
+/** Rendered, not merely present — a collapsed drilldown is still in the DOM. */
+function _pgShown_(el){
+  return !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+}
+
+function _pgTxt_(el){
+  return el ? String(el.textContent||'').replace(/\s+/g,' ').trim() : '';
+}
+
+/** A cell holding only a button or an icon is an action, not a figure. */
+function _pgCell_(td){
+  var c=td.cloneNode(true);
+  Array.prototype.forEach.call(c.querySelectorAll('button,select,input,textarea,svg,i'),function(n){
+    if(n.parentNode) n.parentNode.removeChild(n);
+  });
+  return _pgTxt_(c);
+}
+
+// Excel gets a real number when the whole cell is one, so a column can be
+// summed. Anything carrying a unit — "AED 1,234", "8.2%", "3 of 5" — stays the
+// text it is. Stripping the unit to win a number is how an export starts
+// disagreeing with the screen it came from.
+function _pgVal_(s){
+  var t=String(s==null?'':s).trim();
+  // Either properly grouped thousands or plain digits. Loose matching turned
+  // things that merely contained a comma into whatever Number() made of them.
+  if(!t || !/^-?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/.test(t)) return t;
+  var n=Number(t.replace(/,/g,''));
+  return isFinite(n) ? n : t;
+}
+
+// One walk of the open page, in the order things appear on screen. All six
+// pages are built from the same few pieces — KPI cards, target chips, tables
+// and charts — so one walk covers every one of them.
+function _pgBlocks_(){
+  var page=document.querySelector('.page.active');
+  if(!page) return [];
+  var nodes=page.querySelectorAll('.lgc-sec-title,.slbl,.chart-title,.tbl-title,.kpi,.tgt-chip,table,canvas');
+  var blocks=[], pending='', kpis=[], chips=[];
+
+  // Only a flush that produced something consumes the pending title. Clearing
+  // it either way threw away the heading of whatever came next, every time a
+  // title followed a row of KPI cards — which is most of the way down most of
+  // these pages.
+  function flushKpis(){
+    if(!kpis.length) return;
+    blocks.push({title:pending||'Summary',head:['Item','Value','Change','Note'],rows:kpis});
+    kpis=[]; pending='';
+  }
+  function flushChips(){
+    if(chips.length) blocks.push({title:'Monthly targets',head:['Category','Target'],rows:chips});
+    chips=[];
+  }
+
+  Array.prototype.forEach.call(nodes,function(el){
+    if(!_pgShown_(el)) return;
+
+    if(el.matches('.lgc-sec-title,.slbl,.chart-title,.tbl-title')){
+      flushKpis(); flushChips();
+      pending=_pgTxt_(el);
+      return;
+    }
+
+    if(el.matches('.kpi')){
+      flushChips();
+      kpis.push([_pgTxt_(el.querySelector('.kpi-lbl')),
+                 _pgTxt_(el.querySelector('.kpi-num')),
+                 _pgTxt_(el.querySelector('.kpi-pct')),
+                 Array.prototype.map.call(el.querySelectorAll('.kpi-meta'),_pgTxt_).join(' · ')]);
+      return;
+    }
+
+    if(el.matches('.tgt-chip')){
+      flushKpis();
+      var p=_pgTxt_(el).split(':');
+      chips.push([p[0].trim(),(p[1]||'').trim()]);
+      return;
+    }
+
+    if(el.matches('canvas')){
+      flushKpis(); flushChips();
+      blocks.push({chart:el,title:pending||''});
+      pending='';
+      return;
+    }
+
+    // A table nested inside another is part of that one, not a block of its own.
+    if(el.parentElement && el.parentElement.closest('table')) return;
+
+    flushKpis(); flushChips();
+    var head=Array.prototype.map.call(el.querySelectorAll('thead th'),_pgCell_);
+    var rows=[];
+    Array.prototype.forEach.call(el.querySelectorAll('tbody tr,tfoot tr'),function(tr){
+      if(!_pgShown_(tr)) return;
+      var cells=Array.prototype.map.call(tr.querySelectorAll('th,td'),_pgCell_);
+      if(cells.some(function(c){return c!=='';})) rows.push(cells);
+    });
+    if(!rows.length) { pending=''; return; }
+
+    // The action column at the right of several tables has an empty header and
+    // nothing left in its cells once the buttons are stripped. Carried through
+    // it is just a blank column in the spreadsheet.
+    while(head.length>1 && head[head.length-1]==='' &&
+          rows.every(function(r){ return !r[head.length-1]; })){
+      head.pop();
+      rows.forEach(function(r){ if(r.length>head.length) r.length=head.length; });
+    }
+
+    blocks.push({title:pending||'',head:head,rows:rows});
+    pending='';
+  });
+
+  flushKpis(); flushChips();
+  return blocks;
+}
+
+function _pgTitle_(){ return _pgTxt_(document.getElementById('pageTitle')) || 'Dashboard'; }
+
+/** The date-range button's own label, when it is really a period. */
+function _pgRange_(){
+  var r=_pgTxt_(document.getElementById('dtLbl'));
+  // Pages with no date filter put their own name on that button — "Logistics
+  // Cost", "Capacity Overview". That is a label, not a period, and using it
+  // would print the page title twice and name the file Logistics_Cost_Logistics_Cost.
+  if(!r || /^select date range$/i.test(r) || r===_pgTitle_()) return '';
+  return r;
+}
+
+function _pgStem_(){
+  var r=_pgRange_();
+  return (_pgTitle_()+(r?'_'+r:'')).replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+}
+
+// The dashboard's own name, which is deliberately NOT CFG.market: the name on
+// the reports and the market in Config.gs are set separately, and here they
+// differ. Kept next to the one the Financial export prints so the two cannot
+// drift apart. Rename it along with the other four files.
+function _pgBrand_(){ return 'CALO KMP'; }
+
+// The brand and the page name with a dash between them — except on the page
+// whose own title already begins with the market, where the dash would just
+// say it twice.
+function _pgHeading_(){
+  var b=_pgBrand_(), t=_pgTitle_(), mk=b.split(' ').pop();
+  return t.indexOf(mk+' ')===0 ? b+' '+t.substring(mk.length+1) : b+' — '+t;
+}
+
+function _pgNothing_(){
+  alert('There is nothing on this page to download yet. Let it finish loading — '
+       +'or press Refresh — and try again.');
+}
+
+function downloadPageExcel(){
+  var menu=document.getElementById('dlMenu'); if(menu) menu.classList.remove('open');
+  var blocks=_pgBlocks_();
+  if(!blocks.length) return _pgNothing_();
+
+  var aoa=[[_pgHeading_()]], wide=1;
+  if(_pgRange_()) aoa.push([_pgRange_()]);
+  aoa.push(['Generated '+new Date().toLocaleString('en-GB')]);
+  aoa.push([]);
+
+  blocks.forEach(function(b){
+    if(b.chart) return;                      // a picture of a chart is not data
+    if(b.title) aoa.push([b.title]);
+    if(b.head && b.head.length){ aoa.push(b.head); wide=Math.max(wide,b.head.length); }
+    b.rows.forEach(function(r){ aoa.push(r.map(_pgVal_)); wide=Math.max(wide,r.length); });
+    aoa.push([]);
+  });
+
+  var ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:40}];
+  for(var i=1;i<wide;i++) ws['!cols'].push({wch:16});
+
+  var wb=XLSX.utils.book_new();
+  // Excel rejects a tab name over 31 characters or holding any of \ / ? * [ ] :
+  XLSX.utils.book_append_sheet(wb,ws,_pgTitle_().replace(/[\\\/\?\*\[\]:]/g,'-').substring(0,31));
+  XLSX.writeFile(wb,_pgStem_()+'.xlsx');
+}
+
+function downloadPagePdf(){
+  var menu=document.getElementById('dlMenu'); if(menu) menu.classList.remove('open');
+  var blocks=_pgBlocks_();
+  if(!blocks.length) return _pgNothing_();
+
+  var doc=new jspdf.jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  var green=[0,179,104], dark=[13,31,21], grey=[90,122,104], lightGrey=[240,247,244];
+  var W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight();
+
+  doc.setFillColor.apply(doc,green);
+  doc.rect(0,0,W,22,'F');
+  doc.setTextColor(255,255,255);
+  doc.setFont('helvetica','bold'); doc.setFontSize(14);
+  doc.text(_pgHeading_(),14,9);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  if(_pgRange_()) doc.text(_pgRange_(),14,16);
+  doc.text('Generated: '+new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}),W-72,16);
+
+  var y=30;
+  blocks.forEach(function(b){
+    if(b.chart){
+      var img;
+      // A canvas that has not been drawn into, or was tainted, is skipped
+      // rather than allowed to abort the whole download.
+      try { img=b.chart.toDataURL('image/png'); } catch(e){ return; }
+      if(!img || img.length<2000 || !b.chart.width) return;
+      var cw=Math.min(165,W-28), ch=cw*(b.chart.height/b.chart.width);
+      if(ch>H-40){ ch=H-40; cw=ch*(b.chart.width/b.chart.height); }
+      if(y+ch+10>H-12){ doc.addPage(); y=16; }
+      if(b.title){
+        doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor.apply(doc,dark);
+        doc.text(b.title,14,y); y+=4;
+      }
+      doc.addImage(img,'PNG',14,y,cw,ch);
+      y+=ch+8;
+      return;
+    }
+
+    if(y>H-45){ doc.addPage(); y=16; }
+    if(b.title){
+      doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor.apply(doc,dark);
+      doc.text(b.title,14,y); y+=1;
+    }
+    doc.autoTable({
+      startY:y+3,
+      head:(b.head && b.head.length) ? [b.head] : undefined,
+      body:b.rows,
+      margin:{left:14,right:14},
+      // Sized to its contents. The default stretches every table to the full
+      // width of the page, which turns a two-column table of targets into a
+      // pair of headings with a hand's breadth of white between them.
+      tableWidth:'wrap',
+      headStyles:{fillColor:green,textColor:[255,255,255],fontStyle:'bold',fontSize:8},
+      bodyStyles:{fontSize:8},
+      alternateRowStyles:{fillColor:lightGrey},
+      styles:{cellPadding:2.2,overflow:'linebreak'},
+      columnStyles:{0:{cellWidth:'auto'}}
+    });
+    y=doc.lastAutoTable.finalY+9;
+  });
+
+  // Added last, when the page count is finally known.
+  var n=doc.internal.getNumberOfPages();
+  for(var p=1;p<=n;p++){
+    doc.setPage(p);
+    doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor.apply(doc,grey);
+    doc.text(_pgBrand_()+' Operations Dashboard',14,H-6);
+    doc.text(p+' / '+n,W-22,H-6);
+  }
+  doc.save(_pgStem_()+'.pdf');
+}
+
+// What the top-bar button calls. Financial keeps the export it already had.
+function downloadActiveExcel(){
+  if(_currentPage==='financial') return downloadFinancialExcel();
+  return downloadPageExcel();
+}
+function downloadActivePdf(){
+  if(_currentPage==='financial') return downloadFinancialPdf();
+  return downloadPagePdf();
 }
 
 // ════════════════════════════════════════════════════════════
