@@ -1,5 +1,9 @@
 const fs=require('fs');
-const src=fs.readFileSync('/home/user/Food-Cost-UMP/CaloDeliveries.gs','utf8');
+const path=require('path');
+// Found relative to this file rather than at a fixed location, so the suite
+// runs wherever the repository is checked out — a laptop, a CI runner.
+const ROOT=path.join(__dirname,'..');
+const src=fs.readFileSync(path.join(ROOT,'CaloDeliveries.gs'),'utf8');
 const grid=Array.from({length:170},()=>Array(24).fill(''));
 [1,2,3,4,5,6,7].forEach((d,i)=>{grid[133+i][20]=`Nov ${d}, 26`;});
 [2427,5939,5999,6000,5828,3404,792].forEach((v,i)=>grid[133+i][21]=v);

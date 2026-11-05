@@ -42,4 +42,9 @@ market's sheets are empty. It also diffs `template/` against the live files
 and fails on any difference not on a list of deliberate ones, so a template
 that has fallen behind says so instead of being quietly out of date.
 
-All four exit non-zero on failure.
+All four exit non-zero on failure, and `.github/workflows/tests.yml` runs all
+four on every push and pull request, so a change that breaks one says so on
+GitHub rather than waiting for someone to remember to run them.
+
+Paths are resolved from the test file's own directory, so the suites run from
+any working directory and on any checkout.

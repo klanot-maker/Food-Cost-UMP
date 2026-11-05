@@ -1,7 +1,11 @@
 // Week-aligned window + forecast behaviour.
 // Today is Thursday 2026-11-05. Expected window: Sun 2026-10-25 .. Sat 2026-11-14.
-const fs = require('fs');
-const src = fs.readFileSync('/home/user/Food-Cost-UMP/CaloDeliveries.gs', 'utf8');
+const fs   = require('fs');
+const path = require('path');
+// Found relative to this file rather than at a fixed location, so the suite
+// runs wherever the repository is checked out — a laptop, a CI runner.
+const ROOT = path.join(__dirname, '..');
+const src  = fs.readFileSync(path.join(ROOT, 'CaloDeliveries.gs'), 'utf8');
 
 // DELIVERIES tab: 2026 block starts at row 134. Oct = cols S/T (0-based 18/19),
 // Nov = cols U/V (0-based 20/21). Date in the even col, count in the next.

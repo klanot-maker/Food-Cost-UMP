@@ -3,8 +3,12 @@
 // The clock is Sunday 2026-12-27 — the first week of the year whose
 // forward edge lands in January. Window: Sun 2026-12-20 → Sat 2027-01-09.
 // The tab holds 2026 and nothing after it, exactly as the live sheet does.
-const fs  = require('fs');
-const src = fs.readFileSync('/home/user/Food-Cost-UMP/CaloDeliveries.gs', 'utf8');
+const fs   = require('fs');
+const path = require('path');
+// Found relative to this file rather than at a fixed location, so the suite
+// runs wherever the repository is checked out — a laptop, a CI runner.
+const ROOT = path.join(__dirname, '..');
+const src  = fs.readFileSync(path.join(ROOT, 'CaloDeliveries.gs'), 'utf8');
 
 let ROWS = 200;                       // the tab grows when a block needs room
 const COLS = 24;

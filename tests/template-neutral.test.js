@@ -12,7 +12,9 @@
 // one of the differences listed here.
 const fs   = require('fs');
 const path = require('path');
-const ROOT = '/home/user/Food-Cost-UMP';
+// Found relative to this file rather than at a fixed location, so the suite
+// runs wherever the repository is checked out — a laptop, a CI runner.
+const ROOT = path.join(__dirname, '..');
 const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 let pass = 0, fail = 0;
