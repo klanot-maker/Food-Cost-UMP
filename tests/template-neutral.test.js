@@ -61,7 +61,28 @@ FILES.forEach(f => {
   t('currency falls back loud', CFG_CURRENCY_(), '???');
   t('fx falls back to 1',       CFG_FX_USD_(), 1);
   t('cfgSelfTest is there',     typeof cfgSelfTest, 'function');
+
+  // cfgSelfTest opens each workbook and says which one it got. A market
+  // that filled these ids in with another market's, to see the dashboard
+  // working, gets a dashboard that works and shows the wrong operation —
+  // so the name of what was opened is checked against the market's own.
+  const self = read('template/Config.gs');
+  t('selfTest prints the workbook name', /opens: "' \+ wbName \+ '"/.test(self), true);
+  t('selfTest questions a foreign one',  /does not mention/.test(self), true);
+  t('and says it is written to',         /reads AND writes to it/.test(self), true);
 }
+
+// ── every workbook read goes through Config.gs ──────────────
+// If one reader opened the bound spreadsheet instead, that reader would
+// ignore Config entirely and a market would have no way to point it at
+// their own data.
+['Dashboard.gs', 'CaloDeliveries.gs'].forEach(f => {
+  const s = read('template/' + f);
+  t(f + ' never reads the bound workbook', /getActiveSpreadsheet|getActive\(\)/.test(s), false);
+});
+t('Dashboard opens only via Config',
+  (read('template/Dashboard.gs').match(/SpreadsheetApp\.openById\(/g) || []).length,
+  (read('template/Dashboard.gs').match(/SpreadsheetApp\.openById\(SS_(FINANCIAL|COMPLAINTS|STAFF)_\(\)/g) || []).length);
 
 // ── no delivery figures to prove a filter against ───────────
 {

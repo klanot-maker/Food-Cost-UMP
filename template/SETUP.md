@@ -175,6 +175,26 @@ The id is the long middle part of the address:
 in when the `Access Control` tab is empty or wrong, which it will be on your
 first day. One name means one person leaving locks the market out.
 
+### If the dashboard shows another market's numbers
+
+The scripts hold no figures. Every page draws whatever the three ids above
+point at — 37 workbook reads, all routed through this one file, and not one
+of them reads the spreadsheet the project happens to be attached to.
+
+So a dashboard showing another market's complaints and staff is a dashboard
+whose `Config.gs` still holds their ids. Put your own in and the same pages
+redraw with your data. No other file is touched.
+
+**It is not read-only.** Every page has Edit buttons, the staff log has
+`+ Add Row`, logistics invoices are saved back, and the delivery sync writes
+to the `DELIVERIES` tab every morning. Whatever `Config.gs` names, the
+dashboard can change. Borrowing another market's ids to see the thing
+working leaves you one Edit click from altering their live sheet.
+
+And a web app is deployed as **Execute as: Me**, so it acts with the
+deploying account's access. Everyone you share the link with inherits that
+reach, whatever their own Google account can or cannot open.
+
 Then run **`cfgSelfTest()`** from the editor. It opens every workbook, checks
 every tab name, and reports in plain words. Do this before deploying — a
 wrong id shows up as an empty dashboard, not as an error message.

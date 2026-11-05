@@ -207,7 +207,21 @@ function cfgSelfTest() {
            'or this Google account has no access to it. (' + e.message + ')');
       return;
     }
-    pass('src.' + which + ' opens: "' + ss.getName() + '"');
+    var wbName = ss.getName();
+    pass('src.' + which + ' opens: "' + wbName + '"');
+
+    // A workbook whose name does not mention this market is worth a second
+    // look. Filling these ids in with whichever ones were to hand — another
+    // market's, to see the dashboard working — produces a dashboard that
+    // works perfectly and shows the wrong operation. Nothing about it looks
+    // wrong, and the Edit buttons on every page write back to whatever is
+    // configured here.
+    var mk = String(_cfg_().market || '').trim();
+    if (mk && wbName.toLowerCase().indexOf(mk.toLowerCase()) < 0) {
+      warn('   "' + wbName + '" does not mention "' + mk + '". Check this is ' +
+           'YOUR workbook and not one borrowed to get started — the dashboard ' +
+           'reads AND writes to it.');
+    }
 
     var have = ss.getSheets().map(function(s) { return s.getName(); });
     want[which].forEach(function(tab) {
