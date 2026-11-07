@@ -2723,7 +2723,21 @@ function removeInvoice(id){
 // ════════════════════════════════════════════════════════════
 // CALENDAR — day-range picker (Complaints & Production Staff)
 // ════════════════════════════════════════════════════════════
-var cs = {yr:2026, mo:4, s:null, e:null, sel:0};
+// Today, not a fixed month. This read {yr:2026, mo:4} — May 2026 — which was
+// right for as long as it was May 2026 and a month further out every month
+// after, with nothing to correct it: the Operation Overview calendar beside it
+// takes its month from the clock, and this one never did.
+var cs = {yr:new Date().getFullYear(), mo:new Date().getMonth(), s:null, e:null, sel:0};
+
+// Opening the calendar with no range chosen shows the current month. Once a
+// range has been picked it stays where it was left, so applying a filter and
+// opening it again does not scroll the selection off screen.
+function _initDayCal_(){
+  if(cs.s) return;
+  var now=new Date();
+  cs.yr=now.getFullYear();
+  cs.mo=now.getMonth();
+}
 var MO_LNG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 var MO_SHT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 var DN     = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -3407,7 +3421,7 @@ function toggleCal(){
     var other=document.getElementById('cPopFin');
     other.classList.remove('open');
     p.classList.toggle('open');
-    if(p.classList.contains('open'))renderCal();
+    if(p.classList.contains('open')){_initDayCal_();renderCal();}
   }
 }
 
@@ -3452,7 +3466,9 @@ function applyRange(){
 }
 
 // ── Month picker (Financial Cost only) ───────────────────
-var mcs={yr:2026,s:null,e:null,sel:0};
+// Replaced from the sheet's latest month as soon as the data lands. The year
+// here is only what shows if that never happens, and this year beats a fixed 2026.
+var mcs={yr:new Date().getFullYear(),s:null,e:null,sel:0};
 function prevYr(){mcs.yr--;renderMonthCal();}
 function nextYr(){mcs.yr++;renderMonthCal();}
 function fmtM(d){return MO_SHT[d.getMonth()]+' '+d.getFullYear();}
