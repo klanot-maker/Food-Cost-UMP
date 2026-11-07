@@ -1750,6 +1750,26 @@ function showPage(id) {
   var _navBtn = document.querySelector('.ni[data-page="' + id + '"]');
   if (_navBtn) _navBtn.classList.add('act');
   document.getElementById('pageTitle').textContent = PAGE_TITLES[id];
+
+  // Logistics picks its month from its own dropdown, so the top-bar date
+  // filter has nothing to do there. Worse than nothing: pressing it put a day
+  // range on the button of a page that reads whole months, and not a figure
+  // on the page moved. Hidden rather than disabled — a button that is present
+  // and does nothing is the thing being removed.
+  var _fw = document.querySelector('.fw');
+  if(_fw){
+    var _wantFilter = (id !== 'logistics');
+    _fw.style.display = _wantFilter ? '' : 'none';
+    if(!_wantFilter){
+      // Hiding the wrapper leaves an open calendar open underneath it, ready
+      // to reappear on the next page that does use one.
+      ['cPop','cPopFin','cPopOps'].forEach(function(pid){
+        var el = document.getElementById(pid);
+        if(el) el.classList.remove('open');
+      });
+    }
+  }
+
   // Restore the per-page filter label and re-render so Chart.js uses a visible canvas
   if(id==='financial'){
     document.getElementById('dtLbl').textContent=_finLbl;
