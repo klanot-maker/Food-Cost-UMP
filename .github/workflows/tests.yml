@@ -1,0 +1,45 @@
+# Runs the four suites on every push and every pull request.
+#
+# These tests exist to catch things that fail silently in Apps Script: a
+# delivery count overwritten with a zero, a sync that stops writing on the 1st
+# of January, a template that has quietly inherited UAE's figures. None of
+# those announce themselves, and none of them are visible in a diff. Running
+# the suites by hand catches them only when someone remembers to.
+#
+# template-neutral.test.js will also go red when a live file is changed and
+# template/ is not. That is deliberate — it means the markets' copy has
+# fallen behind, not that the change was wrong. Update template/ to match,
+# and add the line to the EXPECTED list if the difference is meant to stay.
+
+name: tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No dependencies, no package.json — the suites stub the four Apps
+      # Script globals themselves and read the real .gs files off disk.
+      # Each exits non-zero on failure, so a red step is a real failure.
+      - name: Which rows count as a delivery
+        run: node tests/filter.test.js
+
+      - name: The Sunday-to-Saturday sync window
+        run: node tests/sync-window.test.js
+
+      - name: Any column, and the turn of the year
+        run: node tests/year-rollover.test.js
+
+      - name: template/ carries no market's data
+        run: node tests/template-neutral.test.js
