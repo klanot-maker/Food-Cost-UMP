@@ -5,7 +5,7 @@
 // ============================================================
 
 const SPREADSHEET_ID = '1EU45PIpUF1YpsbALtPH-srKkMEzJOvtYrlr2Tx7Rl58';
-const LEDGER_GID = 737255643;
+const LEDGER_GID = 344147005; // 'Petty Cash' tab
 const SUMMARY_NAME = 'Monthly Summary';
 const RECEIPTS_FOLDER = 'Petty Cash Receipts 2026';
 const FIRST_DATA_ROW = 3; // row 3 holds the opening balance
@@ -35,9 +35,12 @@ const INVOICE_SCHEMA = {
 };
 const EXTRACT_PROMPT =
   'This is a photo of a receipt or tax invoice, usually from the UAE. Extract:\n' +
-  '- receipt_number: the receipt, invoice, bill or transaction number exactly as printed ("" if none).\n' +
-  '- invoice_date: the date on the receipt as YYYY-MM-DD ("" if none). UAE receipts print dates day-first.\n' +
-  '- total_amount: the final amount paid in AED, including VAT (0 if not visible).';
+  '- receipt_number: the tax invoice, invoice, receipt or bill number exactly as printed, e.g. the value after ' +
+  '"TAX INVOICE#", "Invoice No." or "Receipt No." ("" if none).\n' +
+  '- invoice_date: the invoice date as YYYY-MM-DD ("" if none). UAE receipts print dates day-first; ' +
+  'ignore stamp dates if a printed date exists.\n' +
+  '- total_amount: the final total in AED including VAT, e.g. "TOTAL AMOUNT DUE" or "Total incl. VAT", ' +
+  'not the amount before VAT (0 if not visible).';
 
 // ── WEB APP ──────────────────────────────────────────────────
 
@@ -79,15 +82,18 @@ function extractInvoice(base64, mimeType) {
     }),
   });
 
-  const msg = JSON.parse(res.getContentText());
+  const raw = res.getContentText();
   if (res.getResponseCode() !== 200) {
-    throw new Error('Claude API error ' + res.getResponseCode() + ': ' + (msg.error ? msg.error.message : ''));
+    console.error(raw);
+    throw new Error('Claude API error ' + res.getResponseCode() + ': ' + raw.slice(0, 300));
   }
-  if (msg.stop_reason !== 'end_turn') {
-    throw new Error('The receipt could not be read (' + msg.stop_reason + '). Enter the details manually.');
-  }
+  const msg = JSON.parse(raw);
   const text = msg.content.filter(function (b) { return b.type === 'text'; })
     .map(function (b) { return b.text; }).join('');
+  if (msg.stop_reason !== 'end_turn' || !text) {
+    console.error(raw);
+    throw new Error('Receipt not read (stop_reason: ' + msg.stop_reason + '). Enter the details manually.');
+  }
   return JSON.parse(text);
 }
 
@@ -138,7 +144,7 @@ function saveEntry(entry) {
 function ledger_() {
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheets()
     .filter(function (s) { return s.getSheetId() === LEDGER_GID; })[0];
-  if (!sheet) throw new Error('Ledger tab (gid ' + LEDGER_GID + ') not found.');
+  if (!sheet) throw new Error('Petty Cash tab (gid ' + LEDGER_GID + ') not found.');
   return sheet;
 }
 
@@ -165,40 +171,36 @@ function savePhoto_(photo) {
 
 function setupSheet() {
   const sheet = ledger_();
+  sheet.getRange(2, 1, 1, 9).setValues([[
+    'Entry Date', 'Transaction Type', 'Payment For', 'Receipt #', 'Invoice Date',
+    'Amount (AED)', 'Balance (AED)', 'Collection Signature', 'Invoice Photo',
+  ]]).setFontWeight('bold');
 
-  // Stray rows: "Cash Balances" footer and date-only rows with no type, payment or amount.
-  const last = nextRow_(sheet) - 1;
-  const rows = sheet.getRange(FIRST_DATA_ROW + 1, 1, last - FIRST_DATA_ROW, 6).getValues();
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const r = rows[i];
-    const empty = r[1] === '' && r[2] === '' && r[3] === '' && r[5] === '';
-    if (r[2] === 'Cash Balances' || empty) {
-      Logger.log('Deleting row ' + (FIRST_DATA_ROW + 1 + i) + ': ' + JSON.stringify(r));
-      sheet.deleteRow(FIRST_DATA_ROW + 1 + i);
-    }
+  if (sheet.getRange(FIRST_DATA_ROW, 1).isBlank()) {
+    sheet.getRange(FIRST_DATA_ROW, 1, 1, 6).setValues([[
+      Utilities.formatDate(new Date(), 'Asia/Dubai', 'yyyy-MM-dd'), '', 'Opening Bal.', '', '', 0]]);
   }
 
   const lastData = nextRow_(sheet) - 1;
-  const n = lastData - FIRST_DATA_ROW + 1;
   const formulas = [];
   for (let r = FIRST_DATA_ROW; r <= lastData; r++) formulas.push([balanceFormula_(r)]);
-  sheet.getRange(FIRST_DATA_ROW, 7, n, 1).setFormulas(formulas).setNumberFormat(MONEY_FMT);
+  sheet.getRange(FIRST_DATA_ROW, 7, formulas.length, 1).setFormulas(formulas);
 
   const tail = sheet.getMaxRows() - FIRST_DATA_ROW + 1;
   sheet.getRange(FIRST_DATA_ROW, 1, tail, 1).setNumberFormat(DATE_FMT);
   sheet.getRange(FIRST_DATA_ROW, 5, tail, 1).setNumberFormat(DATE_FMT);
-  sheet.getRange(2, PHOTO_COL).setValue('Invoice Photo').setFontWeight('bold');
+  sheet.getRange(FIRST_DATA_ROW, 6, tail, 2).setNumberFormat(MONEY_FMT);
 
-  // Dropdowns only below the history, whose free-text values would fail validation.
-  const newRows = sheet.getMaxRows() - lastData;
-  sheet.getRange(lastData + 1, 2, newRows, 1).setDataValidation(
+  // Dropdowns below the opening-balance row.
+  const n = sheet.getMaxRows() - FIRST_DATA_ROW;
+  sheet.getRange(FIRST_DATA_ROW + 1, 2, n, 1).setDataValidation(
     SpreadsheetApp.newDataValidation().requireValueInList(TYPES, true).setAllowInvalid(false).build());
-  sheet.getRange(lastData + 1, 3, newRows, 1).setDataValidation(
+  sheet.getRange(FIRST_DATA_ROW + 1, 3, n, 1).setDataValidation(
     SpreadsheetApp.newDataValidation().requireValueInList(CATEGORIES, true).setAllowInvalid(false).build());
 
   buildSummary_(sheet);
   SpreadsheetApp.flush();
-  Logger.log('Setup done. Closing balance: ' + sheet.getRange(lastData, 7).getValue());
+  Logger.log('Setup done. Balance: ' + sheet.getRange(lastData, 7).getValue());
 }
 
 function buildSummary_(ledger) {

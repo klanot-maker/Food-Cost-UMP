@@ -17,13 +17,12 @@ Phone web app for the **W/H Petty Cash 2026** sheet. You take or upload a photo 
 2. Create `Code.gs` and `Index.html` (File → New → HTML, named `Index`) and paste in these files.
 3. **Project Settings**: tick *Show "appsscript.json"* and paste in `appsscript.json`.
 4. **Project Settings → Script Properties**: add `ANTHROPIC_API_KEY` = your Anthropic API key.
-5. In the editor, run **`setupSheet`** once and approve the permissions. It:
-   - deletes the stray `06/03/2026` and `Cash Balances` rows at the bottom,
-   - resets every Balance cell to the running-sum formula (closing balance stays **248.35**),
-   - sets columns A and E to `dd-MMM-yy`, adds the B/C dropdowns below the existing history and the *Invoice Photo* header,
-   - builds the **Monthly Summary** tab: a month picker in B4, a per-category breakdown, and an all-months table with filters.
+5. In the editor, run **`setupSheet`** once and approve the permissions. On the **Petty Cash** tab it:
+   - writes the headers A–I (Entry Date … Invoice Photo) and an `Opening Bal.` row 3 of 0,
+   - sets Balance to the running-sum formula, dates to `dd-MMM-yy`, and adds the B/C dropdowns,
+   - (re)builds the **Monthly Summary** tab: month picker in B4, per-category breakdown, all-months table with filters.
 6. **Deploy → New deployment → Web app**. Open the URL on your phone and add it to your home screen.
+   After changing the code later, use **Deploy → Manage deployments → Edit → Version: New version** so the phone link picks it up.
 
 Access is set to *Only myself*. To let warehouse staff use it, change `webapp.access` to `DOMAIN`. Anyone who can open the app can then add rows and use your API key.
 
-Older rows keep their free-text *Payment For*, so in the Monthly Summary they are counted under **Other / older entries**.
