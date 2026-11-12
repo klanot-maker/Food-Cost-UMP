@@ -1,6 +1,6 @@
 // ============================================================
 // PETTY CASH APP — Code.gs
-// Web app: photo of a receipt -> Claude reads it -> row appended to the
+// Web app: photo of a receipt -> Gemini (Vertex AI) reads it -> row appended to the
 // "W/H Petty Cash 2026" ledger. setupSheet() is run once by hand.
 // ============================================================
 
@@ -22,16 +22,15 @@ const CATEGORIES = [
   'Warehouse & Office Maintenance',
 ];
 
-const CLAUDE_MODEL = 'claude-opus-5-5';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 const INVOICE_SCHEMA = {
-  type: 'object',
+  type: 'OBJECT',
   properties: {
-    receipt_number: { type: 'string' },
-    invoice_date: { type: 'string' },
-    total_amount: { type: 'number' },
+    receipt_number: { type: 'STRING' },
+    invoice_date: { type: 'STRING' },
+    total_amount: { type: 'NUMBER' },
   },
   required: ['receipt_number', 'invoice_date', 'total_amount'],
-  additionalProperties: false,
 };
 const EXTRACT_PROMPT =
   'This is a photo of a receipt or tax invoice, usually from the UAE. Extract:\n' +
@@ -54,50 +53,40 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+// Vertex AI express mode: the API key goes in the query string, no project or region needed.
 function extractInvoice(base64, mimeType) {
-  const key = (PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY') || '')
+  const key = (PropertiesService.getScriptProperties().getProperty('VERTEX_API_KEY') || '')
     .trim().replace(/^["']|["']$/g, '');
-  if (!key) throw new Error('ANTHROPIC_API_KEY is not set in Project Settings > Script Properties.');
-  if (key.indexOf('sk-ant-') !== 0) {
-    throw new Error('ANTHROPIC_API_KEY does not look like an Anthropic key (should start with "sk-ant-"). ' +
-      'Create one at console.anthropic.com > API Keys.');
-  }
+  if (!key) throw new Error('VERTEX_API_KEY is not set in Project Settings > Script Properties.');
 
-  const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+  const url = 'https://aiplatform.googleapis.com/v1/publishers/google/models/' + GEMINI_MODEL +
+    ':generateContent?key=' + encodeURIComponent(key);
+  const res = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
     muteHttpExceptions: true,
-    headers: {
-      'x-api-key': key,
-      'anthropic-version': '2026-10-21',
-      'anthropic-beta': 'server-side-fallback-2026-07-01',
-    },
     payload: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 4096,
-      fallbacks: 'default',
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: INVOICE_SCHEMA } },
-      messages: [{
+      contents: [{
         role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
-          { type: 'text', text: EXTRACT_PROMPT },
+        parts: [
+          { inlineData: { mimeType: mimeType, data: base64 } },
+          { text: EXTRACT_PROMPT },
         ],
       }],
+      generationConfig: { responseMimeType: 'application/json', responseSchema: INVOICE_SCHEMA },
     }),
   });
 
   const raw = res.getContentText();
   if (res.getResponseCode() !== 200) {
     console.error(raw);
-    throw new Error('Claude API error ' + res.getResponseCode() + ': ' + raw.slice(0, 300));
+    throw new Error('Vertex AI error ' + res.getResponseCode() + ': ' + raw.slice(0, 300));
   }
-  const msg = JSON.parse(raw);
-  const text = msg.content.filter(function (b) { return b.type === 'text'; })
-    .map(function (b) { return b.text; }).join('');
-  if (msg.stop_reason !== 'end_turn' || !text) {
+  const cand = (JSON.parse(raw).candidates || [])[0];
+  const text = cand && cand.content ? cand.content.parts.map(function (p) { return p.text || ''; }).join('') : '';
+  if (!text || cand.finishReason !== 'STOP') {
     console.error(raw);
-    throw new Error('Receipt not read (stop_reason: ' + msg.stop_reason + '). Enter the details manually.');
+    throw new Error('Receipt not read (' + (cand ? cand.finishReason : 'no answer') + '). Enter the details manually.');
   }
   return JSON.parse(text);
 }
