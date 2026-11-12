@@ -55,8 +55,13 @@ function doGet() {
 }
 
 function extractInvoice(base64, mimeType) {
-  const key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  const key = (PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY') || '')
+    .trim().replace(/^["']|["']$/g, '');
   if (!key) throw new Error('ANTHROPIC_API_KEY is not set in Project Settings > Script Properties.');
+  if (key.indexOf('sk-ant-') !== 0) {
+    throw new Error('ANTHROPIC_API_KEY does not look like an Anthropic key (should start with "sk-ant-"). ' +
+      'Create one at console.anthropic.com > API Keys.');
+  }
 
   const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
     method: 'post',
