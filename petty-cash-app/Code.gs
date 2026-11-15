@@ -1,6 +1,6 @@
 // ============================================================
 // PETTY CASH APP — Code.gs
-// Web app: photo of a receipt -> Gemini (Vertex AI) reads it -> row appended to the
+// Web app: photo of a receipt -> Gemini API reads it -> row appended to the
 // "W/H Petty Cash 2026" ledger. setupSheet() is run once by hand.
 // ============================================================
 
@@ -53,18 +53,17 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-// Vertex AI express mode: the API key goes in the query string, no project or region needed.
 function extractInvoice(base64, mimeType) {
   const key = (PropertiesService.getScriptProperties().getProperty('VERTEX_API_KEY') || '')
     .trim().replace(/^["']|["']$/g, '');
   if (!key) throw new Error('VERTEX_API_KEY is not set in Project Settings > Script Properties.');
 
-  const url = 'https://aiplatform.googleapis.com/v1/publishers/google/models/' + GEMINI_MODEL +
-    ':generateContent?key=' + encodeURIComponent(key);
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
   const res = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
     muteHttpExceptions: true,
+    headers: { 'x-goog-api-key': key },
     payload: JSON.stringify({
       contents: [{
         role: 'user',
@@ -80,7 +79,7 @@ function extractInvoice(base64, mimeType) {
   const raw = res.getContentText();
   if (res.getResponseCode() !== 200) {
     console.error(raw);
-    throw new Error('Vertex AI error ' + res.getResponseCode() + ': ' + raw.slice(0, 300));
+    throw new Error('Gemini API error ' + res.getResponseCode() + ': ' + raw.slice(0, 300));
   }
   const cand = (JSON.parse(raw).candidates || [])[0];
   const text = cand && cand.content ? cand.content.parts.map(function (p) { return p.text || ''; }).join('') : '';
