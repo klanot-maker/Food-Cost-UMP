@@ -34,19 +34,38 @@ function slice(file, start, end) {
 
 // ── stubs ───────────────────────────────────────────────────
 let SHEETS = {};                       // id -> {tabName: rows}
+let COLS_READ = 0;                     // how wide the last read was
 global.SpreadsheetApp = {
   openById: id => {
     if (!SHEETS[id]) throw new Error('no such workbook: ' + id);
-    return { getSheetByName: n => SHEETS[id][n]
-      ? { getDataRange: () => ({ getValues: () => SHEETS[id][n] }) } : null };
+    return { getSheetByName: n => {
+      const rows = SHEETS[id][n];
+      if (!rows) return null;
+      const width = rows.reduce((w, r) => Math.max(w, r.length), 0);
+      return {
+        getLastRow: () => rows.length,
+        getLastColumn: () => width,
+        getRange: (r, c, nr, nc) => ({
+          getValues: () => {
+            COLS_READ = nc;
+            return rows.slice(r - 1, r - 1 + nr).map(row => row.slice(c - 1, c - 1 + nc));
+          }
+        })
+      };
+    }};
   }
 };
-global.Session   = { getScriptTimeZone: () => 'Asia/Dubai' };
-global.Utilities = {
-  // Only ever called with 'yyyy-MM-dd' here; the real one is Apps Script's.
-  formatDate: (d, tz, fmt) => d.getFullYear() + '-' +
-    ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2)
-};
+
+// Both of these are Apps Script service calls. Used once per shift they put
+// about 11,000 round trips into a single load, which is what left the page on
+// "Loading manpower data…" for ever. They are rigged to throw so the reader
+// can never quietly start calling them again.
+global.Session = { getScriptTimeZone: () => {
+  throw new Error('getScriptTimeZone is a service call — do not use it per row');
+}};
+global.Utilities = { formatDate: () => {
+  throw new Error('formatDate is a service call — do not use it per row');
+}};
 let CACHE = {};
 global._srcKey_   = (b, ids) => b + '|' + ids.join(',');
 global._cacheGet_ = k => CACHE[k] || null;
@@ -113,6 +132,11 @@ const align1 = book.rows.find(r => r.company === 'Align');
 t('an unclosed punch is flagged', align1.attention, 1);
 
 t('suppliers come from the data, not a fixed list', book.companies, ['Align', 'SMS']);
+// The stubs above throw if either service is touched, so getting this far at
+// all is the assertion. The width check keeps the read off the five columns
+// after Status, which nothing here looks at.
+t('a whole workbook is read without one service call', book.rows.length > 0, true);
+t('and only as far as the Status column', COLS_READ, 12);
 t('a row with no date is skipped', book.rows.every(r => r.ds), true);
 t('a row with no company is skipped',
   book.rows.some(r => r.ds === '2026-11-03'), false);

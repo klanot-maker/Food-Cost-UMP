@@ -247,7 +247,16 @@ var _MP_MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,no
 /** 'YYYY-MM-DD' from a real Date or from the sheet's "01-Oct-2026" text. */
 function _mpDateStr_(v) {
   if (v instanceof Date && !isNaN(v)) {
-    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    // Built by hand rather than with Utilities.formatDate. That and
+    // Session.getScriptTimeZone() are both service calls, and this runs once
+    // per shift — about 5,500 rows across the two workbooks, so around 11,000
+    // service calls per load. It did not fail; it simply never came back, and
+    // the page sat on "Loading manpower data…" indefinitely.
+    //
+    // getValues() has already resolved these to Dates in the script's own
+    // timezone, so the local getters are the right ones and cost nothing.
+    return v.getFullYear() + '-' + ('0' + (v.getMonth() + 1)).slice(-2) +
+           '-' + ('0' + v.getDate()).slice(-2);
   }
   var s = String(v || '').trim();
   if (!s) return '';
@@ -289,7 +298,12 @@ function _mpReadBook_(id, area) {
              area + ' manpower workbook' };
   }
 
-  var all = sh.getDataRange().getValues();
+  // Only as far as Status (column L). getDataRange() would also drag back
+  // Role, Flags, Notes, Record ID and Last Updated — five more columns across
+  // thousands of rows, none of which this reads.
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return { rows: [], companies: [] };
+  var all = sh.getRange(1, 1, lastRow, Math.min(12, sh.getLastColumn())).getValues();
   if (all.length < 2) return { rows: [], companies: [] };
 
   var buckets = {}, seen = {}, companies = {};

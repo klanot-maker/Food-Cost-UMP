@@ -4491,12 +4491,28 @@ function _mpLoad(cb){
     return;
   }
   _mpLoading=true;
+  // A call that never answers used to leave "Loading manpower data…" on screen
+  // for ever, which looks exactly like a page that has forgotten about you.
+  // Say so instead, and let Refresh try again.
+  var done=false;
+  var tmo=setTimeout(function(){
+    if(done) return;
+    done=true; _mpLoading=false; _mpLoaded=true;
+    _mpErr='The manpower workbooks did not answer within 60 seconds. They may be '
+          +'very large, or the ids in Config.gs may point somewhere unreachable — '
+          +'run cfgSelfTest(). Press Refresh to try again.';
+    if(cb) cb();
+  },60000);
   google.script.run
     .withSuccessHandler(function(r){
+      if(done) return;
+      done=true; clearTimeout(tmo);
       MP_DATA=r||null; _mpLoaded=true; _mpLoading=false; _mpErr=null;
       _mpInit(); if(cb) cb();
     })
     .withFailureHandler(function(e){
+      if(done) return;
+      done=true; clearTimeout(tmo);
       _mpLoading=false; _mpLoaded=true;
       _mpErr=(e&&e.message)||'Could not load the manpower workbooks.';
       if(cb) cb();
@@ -4722,6 +4738,21 @@ function renderManpower(){
     if(b&&b.error) hint.push('<span style="color:var(--red);font-weight:700;">'+_mpAreaLbl(a)+': '+b.error+'</span>');
   });
   if(attention>0) hint.push('<b>'+attention+'</b> shift'+(attention===1?'':'s')+' still open (missing punch) — their cost is provisional.');
+
+  // Each book starts when that area began logging — Kitchen in September 2026,
+  // Dispatch in October. Choosing an earlier month is not a fault, so name the
+  // book that has nothing yet rather than quietly showing it as zero spend.
+  ['kitchen','dispatch'].forEach(function(a){
+    if(area!=='all'&&area!==a) return;
+    var b=MP_DATA&&MP_DATA[a];
+    if(!b||!b.rows||!b.rows.length) return;
+    var first=b.rows[0].ds;                        // rows arrive sorted by date
+    if(ym<first.substring(0,7)){
+      hint.push(_mpAreaLbl(a)+' has no shifts before '
+        +MO_LNG[parseInt(first.substring(5,7),10)-1]+' '+first.substring(0,4)
+        +', so it adds nothing to this month.');
+    }
+  });
   document.getElementById('mpCovHint').innerHTML=hint.join('<br>');
 
   document.getElementById('mpMtdVerdict').innerHTML=
