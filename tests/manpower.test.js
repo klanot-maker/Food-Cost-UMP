@@ -141,6 +141,35 @@ t('a row with no date is skipped', book.rows.every(r => r.ds), true);
 t('a row with no company is skipped',
   book.rows.some(r => r.ds === '2026-11-03'), false);
 
+// ── the Settings tab's current rates ────────────────────────
+SHEETS.R = { Attendance: [HDR, shift('01-Nov-2026','S-1','SMS',8,0,88,'COMPLETE')],
+  // Rows 1–10 are other settings; "Companies" sits on row 11, its header on
+  // row 12, and the first agency on row 13, as in the real workbook.
+  Settings: Array(10).fill(['']).concat([
+    ['Companies','',''],
+    ['Company Name','ID Prefix','Active','Hourly Rate (AED)','Rate — Male','Rate — Female'],
+    ['SMS',         'SMS','Yes','10.50','11.00','12.00'],
+    ['Align',       'ALN','Yes','10.16','',''],
+    ['Star Service','STR','No', '7.93', '',''],
+    ['',            '',   '',   '',     '',''],
+  ])};
+const rates = _mpReadBook_('R', 'kitchen').rates;
+
+// The sheet says so itself: filling in Male and Female "makes Hourly Rate
+// unused for that company". SMS's cell still reads 10.50 while it actually
+// charges 11.00 and 12.00, so carrying the flat figure through would be wrong.
+t('a company charging by gender reports no flat rate', rates.SMS.rate, 0);
+t('and reports both of its real ones',
+  [rates.SMS.rateM, rates.SMS.rateF], [11, 12]);
+t('a company on one rate reports it', rates.Align.rate, 10.16);
+t('and has no gender rates', [rates.Align.rateM, rates.Align.rateF], [0, 0]);
+t('Active yes/no is carried through',
+  [rates.SMS.active, rates['Star Service'].active], [true, false]);
+t('blank rows are skipped', Object.keys(rates).sort(),
+  ['Align', 'SMS', 'Star Service']);
+t('a workbook with no Settings tab is not an error',
+  _mpReadBook_('K', 'kitchen').rates, {});
+
 t('a workbook that will not open reports why, rather than throwing',
   (_mpReadBook_('NOPE', 'kitchen').error || '').indexOf('cannot open') >= 0, true);
 SHEETS.E = { Other: [] };

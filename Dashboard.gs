@@ -286,9 +286,10 @@ function _mpNum_(v) {
 function _mpReadBook_(id, area) {
   if (!id) return { rows: [], companies: [], skipped: 'not configured' };
 
-  var sh;
+  var ss, sh;
   try {
-    sh = SpreadsheetApp.openById(id).getSheetByName('Attendance');
+    ss = SpreadsheetApp.openById(id);
+    sh = ss.getSheetByName('Attendance');
   } catch (e) {
     return { rows: [], companies: [], error: 'cannot open the ' + area +
              ' manpower workbook: ' + e.message };
@@ -346,7 +347,39 @@ function _mpReadBook_(id, area) {
   // Taken from the data, not from a fixed list. The workbooks carry a tab per
   // agency including ones with no punches yet, and a hardcoded list would show
   // those as a permanent zero row.
-  return { rows: rows, companies: Object.keys(companies).sort() };
+  return { rows: rows, companies: Object.keys(companies).sort(),
+           rates: _mpRates_(ss) };
+}
+
+/**
+ * The Settings tab's company list — the rate each agency charges TODAY, and
+ * whether it is still in use. Nothing is costed from this: every shift already
+ * carries the rate it was costed at. It is here so the supplier table can show
+ * the current rate beside the spend.
+ */
+function _mpRates_(ss) {
+  var out = {};
+  var sh = ss.getSheetByName('Settings');
+  if (!sh) return out;
+  var last = sh.getLastRow();
+  if (last < 13) return out;                 // row 12 is the header
+
+  var rows = sh.getRange(13, 1, last - 12, 6).getValues();
+  rows.forEach(function(r) {
+    var name = String(r[0] || '').trim();
+    if (!name) return;
+    var m = _mpNum_(r[4]), f = _mpNum_(r[5]);
+    out[name] = {
+      active: String(r[2] || '').trim().toLowerCase() !== 'no',
+      // The sheet's own note: filling in Male and Female rates "makes Hourly
+      // Rate unused for that company". SMS charges 11.00 and 12.00 while its
+      // Hourly Rate cell still reads 10.50, so showing that would be wrong.
+      rate:  (m > 0 || f > 0) ? 0 : _mpNum_(r[3]),
+      rateM: m,
+      rateF: f
+    };
+  });
+  return out;
 }
 
 function getManpowerData(force) {

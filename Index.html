@@ -4628,29 +4628,44 @@ function _mpDelta(cur, prev){
  * head is the warning, not exceeding it.
  */
 function _mpVerdict(title, value, target, note, hasData, why){
+  // A quieter banner than the solid blocks on the Logistics page. These two
+  // sit directly above their own tiles, and two full-width slabs of colour
+  // one after the other drown the figures they are introducing. The colour
+  // now carries on an edge and the number, with the text left readable.
+  function shell(accent, tint, lbl, big, line1, line2, bar){
+    return '<div style="display:flex;flex-wrap:wrap;gap:20px;align-items:center;background:'+tint
+      +';border:1px solid '+accent+'40;border-left:5px solid '+accent
+      +';border-radius:var(--rs);padding:13px 18px;margin-bottom:12px;">'
+      +'<div style="min-width:155px;">'
+      +'<div style="font-size:9.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);">'+lbl+'</div>'
+      +'<div style="font-size:33px;font-weight:800;line-height:1.15;color:'+accent+';">'+big+'</div>'
+      +'</div>'
+      +'<div style="flex:1;min-width:240px;">'
+      +'<div style="font-size:13px;font-weight:700;color:var(--txt);">'+line1+'</div>'
+      +'<div style="font-size:11px;color:var(--mut);margin-top:3px;">'+line2+'</div>'
+      +(bar===null?'':'<div style="height:6px;border-radius:3px;background:rgba(0,0,0,0.07);margin-top:9px;overflow:hidden;">'
+        +'<div style="height:100%;width:'+Math.max(0,Math.min(100,bar))+'%;background:'+accent+';"></div></div>')
+      +'</div></div>';
+  }
+
   if(!hasData){
-    return '<div class="lgc-verdict" style="background:#FEF5E7;color:#8A5A08;border:1.5px solid #C07A10;">'
-      +'<div><div class="lgc-verdict-lbl">'+title+'</div>'
-      +'<div class="lgc-verdict-msg">'+(why||'No data for this month yet.')+'</div></div></div>';
+    return shell('#C07A10','#FEF7EC',title,'—',
+      '⚠️ '+(why||'No data for this month yet.'),
+      'Nothing to measure against the target until this is resolved.',null);
   }
   var under=value<target;
-  var bg=under?'#D94040':'#00C07F';
+  var accent=under?'#D94040':'#00A56C';
+  var tint  =under?'#FDF2F2':'#EDFAF4';
   var diff=Math.abs(value-target);
   var pctOfTarget=target>0?(value/target*100):0;
   var msg=under
-    ? 'BELOW target by '+_lgcMoney(diff)+' deliveries per person'
+    ? 'Below target by '+_lgcMoney(diff)+' deliveries per person'
     : 'At or above target — '+_lgcMoney(diff)+' per person above';
-  return '<div class="lgc-verdict" style="background:'+bg+';color:#fff;">'
-    +'<div style="min-width:150px;">'
-    +'<div class="lgc-verdict-lbl">'+title+' — deliveries / person</div>'
-    +'<div class="lgc-verdict-num">'+_lgcMoney(value)+'</div>'
-    +'</div>'
-    +'<div style="flex:1;min-width:220px;">'
-    +'<div class="lgc-verdict-msg">'+(under?'⚠️ ':'✅ ')+msg
-    +(target>0?(' ('+(Math.round(Math.abs(pctOfTarget-100)*10)/10)+'% '+(under?'under':'over')+')'):'')+'</div>'
-    +'<div class="lgc-verdict-sub">Target '+_lgcMoney(target)+' · running at '+(Math.round(pctOfTarget*10)/10)+'% of target'+(note?' · '+note:'')+'</div>'
-    +'<div class="lgc-bar"><div style="width:'+Math.max(0,Math.min(100,pctOfTarget))+'%;background:#fff;"></div></div>'
-    +'</div></div>';
+  return shell(accent,tint,title+' — deliveries / person',_lgcMoney(value),
+    (under?'⚠️ ':'✅ ')+msg
+      +(target>0?(' ('+(Math.round(Math.abs(pctOfTarget-100)*10)/10)+'% '+(under?'under':'over')+')'):''),
+    'Target '+_lgcMoney(target)+' · running at '+(Math.round(pctOfTarget*10)/10)+'% of target'+(note?' · '+note:''),
+    pctOfTarget);
 }
 
 function renderManpower(){
@@ -4684,10 +4699,14 @@ function renderManpower(){
   var daysInMonth=new Date(parseInt(p[0],10),parseInt(p[1],10),0).getDate();
 
   var cost=0,hours=0,ot=0,shifts=0,attention=0;
-  var byDay={}, byDayStaff={}, bySupplier={}, dayStaff={};
+  var byDay={}, byDayHours={}, byDayOt={}, byDaySup={}, bySupplier={}, dayStaff={};
   rows.forEach(function(r){
     cost+=r.cost; hours+=r.hours; ot+=r.ot; shifts+=r.shifts; attention+=r.attention;
     byDay[r.ds]=(byDay[r.ds]||0)+r.cost;
+    byDayHours[r.ds]=(byDayHours[r.ds]||0)+r.hours;
+    byDayOt[r.ds]=(byDayOt[r.ds]||0)+r.ot;
+    if(!byDaySup[r.ds]) byDaySup[r.ds]={};
+    byDaySup[r.ds][r.company]=1;
     // Headcount is already distinct within a day-and-company bucket. Summing
     // across companies can double-count anyone working for two agencies in a
     // day, which is rare enough to accept and the alternative — shipping every
@@ -4731,11 +4750,27 @@ function renderManpower(){
   else if(deliveries<=0) why='No deliveries found for this month in the DELIVERIES sheet, so deliveries per person cannot be worked out.';
   else if(sd.personDays<=0) why='No staff log found for '+MO_LNG[parseInt(p[1],10)-1]+' '+p[0]+', so there is no headcount to divide by. The staff sheet is named like "November : 2026".';
 
-  // Anything not COMPLETE is a punch nobody closed; its cost is provisional.
+  // A load that failed must never be drawn as a month with no agency spend.
+  // On the tiles the two are identical — 0.00 either way — and the whole
+  // point of the section is the difference between them. So the figures are
+  // withheld and the reason is put where it cannot be missed.
+  var mpRowCount=((((MP_DATA||{}).kitchen||{}).rows||[]).length)
+                +((((MP_DATA||{}).dispatch||{}).rows||[]).length);
+  // Withhold the figures only when there is genuinely nothing to show AND the
+  // reason is a failure. A refresh that fails on top of data already loaded
+  // still has real numbers; those are worth showing, with a note that they may
+  // now be behind the sheet.
+  var mpOk=!(_mpErr&&!mpRowCount);
+
   var hint=[];
+  if(_mpErr) hint.push('<span style="color:var(--red);font-weight:700;">Agency cost could not be '
+    +(mpRowCount?'refreshed':'loaded')+': '+_mpErr
+    +(mpRowCount?' The figures below are the last ones that loaded and may be out of date.':'')
+    +'</span>');
   ['kitchen','dispatch'].forEach(function(a){
     var b=MP_DATA&&MP_DATA[a];
-    if(b&&b.error) hint.push('<span style="color:var(--red);font-weight:700;">'+_mpAreaLbl(a)+': '+b.error+'</span>');
+    if(b&&b.error){ mpOk=false;
+      hint.push('<span style="color:var(--red);font-weight:700;">'+_mpAreaLbl(a)+': '+b.error+'</span>'); }
   });
   if(attention>0) hint.push('<b>'+attention+'</b> shift'+(attention===1?'':'s')+' still open (missing punch) — their cost is provisional.');
 
@@ -4755,20 +4790,24 @@ function renderManpower(){
   });
   document.getElementById('mpCovHint').innerHTML=hint.join('<br>');
 
+  var money=function(n){ return mpOk?_lgcMoney(n):'—'; };
+  var spendNote=mpOk?('agency spend '+CUR+' '+_lgcMoney(cost)+' '+delta.txt)
+                    :'agency spend could not be loaded';
+
   document.getElementById('mpMtdVerdict').innerHTML=
     _mpVerdict('Month to date',perPerson,target,
       deliveries.toLocaleString()+' deliveries ÷ '+sd.personDays.toLocaleString()+' person-days across '
-      +sd.depts.length+' department'+(sd.depts.length===1?'':'s')+' · agency spend '+CUR+' '
-      +_lgcMoney(cost)+' '+delta.txt, hasData, why);
+      +sd.depts.length+' department'+(sd.depts.length===1?'':'s')+' · '+spendNote, hasData, why);
 
   var avgStaff=loggedDays?Math.round(Object.keys(dayStaff).reduce(function(t,k){return t+dayStaff[k];},0)/loggedDays):0;
   document.getElementById('mpMtdTiles').innerHTML=
-     _lgcTile('Manpower Cost',_lgcMoney(cost),CUR+' · '+_mpAreaLbl(area),'')
-    +_lgcTile('vs Last Month',delta.pct===null?'—':((delta.up?'+':'')+(Math.round(delta.pct*10)/10)+'%'),
-              prevCost>0?(CUR+' '+_lgcMoney(prevCost)+' over the same days'):'nothing to compare',
-              delta.pct===null?'':(delta.up?'#D94040':'#00C07F'))
-    +_lgcTile('Hours',_lgcMoney(hours),shifts.toLocaleString()+' shifts · OT '+_lgcMoney(ot),'')
-    +_lgcTile('Agency Staff / Day',avgStaff.toLocaleString(),loggedDays+' day'+(loggedDays===1?'':'s')+' logged','')
+     _lgcTile('Manpower Cost',money(cost),mpOk?(CUR+' · '+_mpAreaLbl(area)):'not loaded','')
+    +_lgcTile('vs Last Month',(!mpOk||delta.pct===null)?'—':((delta.up?'+':'')+(Math.round(delta.pct*10)/10)+'%'),
+              !mpOk?'not loaded':(prevCost>0?(CUR+' '+_lgcMoney(prevCost)+' over the same days'):'nothing logged last month'),
+              (!mpOk||delta.pct===null)?'':(delta.up?'#D94040':'#00C07F'))
+    +_lgcTile('Hours',money(hours),mpOk?(shifts.toLocaleString()+' shifts · OT '+_lgcMoney(ot)):'not loaded','')
+    +_lgcTile('Agency Staff / Day',mpOk?avgStaff.toLocaleString():'—',
+              mpOk?(loggedDays+' day'+(loggedDays===1?'':'s')+' logged'):'not loaded','')
     +_lgcTile('Deliveries / Person',hasData?_lgcMoney(perPerson):'—','target '+_lgcMoney(target),
               hasData?(perPerson<target?'#D94040':'#00C07F'):'');
 
@@ -4783,17 +4822,25 @@ function renderManpower(){
   var projHas=projDel.total>0&&projPersonDays>0;
   var projDelta=_mpDelta(projCost.total,prevFull);
 
+  // Whether the month is over is a question for the calendar, not for how
+  // much data happened to load. With the agency books unreachable, projCost
+  // has nothing to project and the banner used to announce the month complete
+  // halfway through November.
+  var monthOver=ym<_mpCurrentYM();
+
   document.getElementById('mpProjVerdict').innerHTML=
-    _mpVerdict(projCost.projectedDays?'Projected month end':'Month end (complete)',
-      projPerPerson,target,projCost.basis+' · projected agency spend '+CUR+' '
-      +_lgcMoney(projCost.total)+(prevFull>0?' against '+_lgcMoney(prevFull)+' last month':''),
+    _mpVerdict(monthOver?'Month end (complete)':'Projected month end',
+      projPerPerson,target,projCost.basis+' · '+(mpOk
+        ?('projected agency spend '+CUR+' '+_lgcMoney(projCost.total)
+          +(prevFull>0?' against '+_lgcMoney(prevFull)+' last month':''))
+        :'agency spend could not be loaded'),
       projHas,why);
   document.getElementById('mpProjTiles').innerHTML=
-     _lgcTile('Proj. Manpower Cost',_lgcMoney(projCost.total),
-              projCost.projectedDays?('+'+_lgcMoney(projCost.total-projCost.actual)+' still to come'):'month complete','')
-    +_lgcTile('vs Last Month',projDelta.pct===null?'—':((projDelta.up?'+':'')+(Math.round(projDelta.pct*10)/10)+'%'),
-              prevFull>0?(CUR+' '+_lgcMoney(prevFull)+' last month in full'):'nothing to compare',
-              projDelta.pct===null?'':(projDelta.up?'#D94040':'#00C07F'))
+     _lgcTile('Proj. Manpower Cost',money(projCost.total),
+              !mpOk?'not loaded':(projCost.projectedDays?('+'+_lgcMoney(projCost.total-projCost.actual)+' still to come'):'month complete'),'')
+    +_lgcTile('vs Last Month',(!mpOk||projDelta.pct===null)?'—':((projDelta.up?'+':'')+(Math.round(projDelta.pct*10)/10)+'%'),
+              !mpOk?'not loaded':(prevFull>0?(CUR+' '+_lgcMoney(prevFull)+' last month in full'):'nothing logged last month'),
+              (!mpOk||projDelta.pct===null)?'':(projDelta.up?'#D94040':'#00C07F'))
     +_lgcTile('Proj. Deliveries',Math.round(projDel.total).toLocaleString(),
               projDel.projectedDays?'by same weekday':'actual','')
     +_lgcTile('Proj. Person-Days',Math.round(projPersonDays).toLocaleString(),
@@ -4805,13 +4852,28 @@ function renderManpower(){
   var sups=Object.keys(bySupplier).map(function(k){return bySupplier[k];})
     .sort(function(a,b){return b.cost-a.cost;});
   if(!sups.length){
-    document.getElementById('mpSupplier').innerHTML='<div style="color:var(--lt);font-size:12.5px;padding:6px 0;">No agency shifts recorded for this month.</div>';
+    document.getElementById('mpSupplier').innerHTML='<div style="color:'+(mpOk?'var(--lt)':'var(--red)')
+      +';font-size:12.5px;padding:6px 0;font-weight:'+(mpOk?'400':'700')+';">'
+      +(mpOk?'No agency shifts recorded for this month.'
+            :'Agency cost could not be loaded, so this is empty for a reason that is not "no shifts". See the message above.')
+      +'</div>';
   } else {
-    var sh='<table class="lgc-tbl"><thead><tr><th>Supplier</th><th>Area</th><th class="num">Days</th>'
+    var sh='<table class="lgc-tbl"><thead><tr><th>Supplier</th><th>Area</th>'
+      +'<th class="num">Rate now</th><th class="num">Days</th>'
       +'<th class="num">Shifts</th><th class="num">Hours</th><th class="num">OT</th>'
       +'<th class="num">Cost ('+CUR+')</th><th class="num">Share</th></tr></thead><tbody>';
     sups.forEach(function(s){
-      sh+='<tr><td><b>'+s.company+'</b></td><td>'+_mpAreaLbl(s.area)+'</td>'
+      // Today's rate from the Settings tab, shown for context only — the cost
+      // beside it was worked out at whatever each shift was costed at.
+      var rt=((MP_DATA&&MP_DATA[s.area]&&MP_DATA[s.area].rates)||{})[s.company];
+      var rate=!rt ? '—'
+        : (rt.rateM>0||rt.rateF>0)
+          ? (_lgcMoney(rt.rateM)+' M / '+_lgcMoney(rt.rateF)+' F')   // charges by gender
+          : (rt.rate>0?_lgcMoney(rt.rate):'—');
+      sh+='<tr><td><b>'+s.company+'</b>'
+        +((rt&&!rt.active)?' <span style="font-size:9.5px;font-weight:700;color:var(--mut);">INACTIVE</span>':'')
+        +'</td><td>'+_mpAreaLbl(s.area)+'</td>'
+        +'<td class="num">'+rate+'</td>'
         +'<td class="num">'+Object.keys(s.days).length+'</td>'
         +'<td class="num">'+s.shifts.toLocaleString()+'</td>'
         +'<td class="num">'+_lgcMoney(s.hours)+'</td>'
@@ -4819,7 +4881,7 @@ function renderManpower(){
         +'<td class="num"><b>'+_lgcMoney(s.cost)+'</b></td>'
         +'<td class="num">'+(cost>0?(Math.round(s.cost/cost*1000)/10)+'%':'—')+'</td></tr>';
     });
-    sh+='</tbody><tfoot><tr><td><b>TOTAL</b></td><td></td><td class="num">'+loggedDays+'</td>'
+    sh+='</tbody><tfoot><tr><td><b>TOTAL</b></td><td></td><td class="num"></td><td class="num">'+loggedDays+'</td>'
       +'<td class="num">'+shifts.toLocaleString()+'</td><td class="num">'+_lgcMoney(hours)+'</td>'
       +'<td class="num">'+_lgcMoney(ot)+'</td><td class="num"><b>'+_lgcMoney(cost)+'</b></td>'
       +'<td class="num">100%</td></tr></tfoot></table>';
@@ -4829,25 +4891,39 @@ function renderManpower(){
   // ── Daily breakdown ──
   var days=Object.keys(byDay).sort();
   if(!days.length){
-    document.getElementById('mpDaily').innerHTML='<div style="color:var(--lt);font-size:12.5px;padding:6px 0;">Nothing logged for this month.</div>';
+    document.getElementById('mpDaily').innerHTML='<div style="color:'+(mpOk?'var(--lt)':'var(--red)')
+      +';font-size:12.5px;padding:6px 0;font-weight:'+(mpOk?'400':'700')+';">'
+      +(mpOk?'Nothing logged for this month.'
+            :'Agency cost could not be loaded — this is not an empty month.')+'</div>';
   } else {
     var WD=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    var dh='<table class="lgc-tbl"><thead><tr><th>Date</th><th class="num">Staff</th>'
+    var dh='<div style="font-size:11.5px;color:var(--mut);margin-bottom:8px;">'
+      +'One row per day the agencies worked, so a spike can be traced to the day it happened '
+      +'rather than inferred from the month total. Agencies counts how many of them were on that day.</div>'
+      +'<table class="lgc-tbl"><thead><tr><th>Date</th><th class="num">Agencies</th>'
+      +'<th class="num">Staff</th><th class="num">Hours</th><th class="num">OT</th>'
       +'<th class="num">Cost ('+CUR+')</th><th class="num">Deliveries</th>'
       +'<th class="num">Cost / Delivery</th></tr></thead><tbody>';
     days.forEach(function(ds){
       var dd=delByDay[ds]||0, c=byDay[ds]||0;
       var r=dd>0?(c/dd):0;
       dh+='<tr><td>'+WD[_mpWeekday_(ds)]+' '+ds.substring(8)+' '+MO_SHT[parseInt(ds.substring(5,7),10)-1]+'</td>'
+        +'<td class="num">'+Object.keys(byDaySup[ds]||{}).length+'</td>'
         +'<td class="num">'+(dayStaff[ds]||0)+'</td>'
-        +'<td class="num">'+_lgcMoney(c)+'</td>'
+        +'<td class="num">'+_lgcMoney(byDayHours[ds]||0)+'</td>'
+        +'<td class="num">'+_lgcMoney(byDayOt[ds]||0)+'</td>'
+        +'<td class="num"><b>'+_lgcMoney(c)+'</b></td>'
         +'<td class="num">'+(dd?dd.toLocaleString():'—')+'</td>'
         // Not coloured against the target: the target counts deliveries per
         // person, and this column is agency money per delivery. Comparing the
         // two would paint most days red for no reason.
         +'<td class="num">'+(dd?_lgcMoney(r):'—')+'</td></tr>';
     });
-    dh+='</tbody></table>';
+    dh+='</tbody><tfoot><tr><td><b>TOTAL</b></td><td class="num"></td>'
+      +'<td class="num"></td><td class="num">'+_lgcMoney(hours)+'</td>'
+      +'<td class="num">'+_lgcMoney(ot)+'</td><td class="num"><b>'+_lgcMoney(cost)+'</b></td>'
+      +'<td class="num">'+deliveries.toLocaleString()+'</td>'
+      +'<td class="num">'+(deliveries>0?_lgcMoney(cost/deliveries):'—')+'</td></tr></tfoot></table>';
     document.getElementById('mpDaily').innerHTML=dh;
   }
 }
