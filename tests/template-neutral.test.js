@@ -82,9 +82,34 @@ FILES.forEach(f => {
   const s = read('template/' + f);
   t(f + ' never reads the bound workbook', /getActiveSpreadsheet|getActive\(\)/.test(s), false);
 });
-t('Dashboard opens only via Config',
-  (read('template/Dashboard.gs').match(/SpreadsheetApp\.openById\(/g) || []).length,
-  (read('template/Dashboard.gs').match(/SpreadsheetApp\.openById\(SS_(FINANCIAL|COMPLAINTS|STAFF)_\(\)/g) || []).length);
+// Checks the argument of every open rather than counting them, so a new call
+// site has to be traceable to Config rather than merely keep a tally even.
+{
+  const s = read('template/Dashboard.gs');
+  // Balanced parens, because the argument is usually itself a call: a lazy
+  // [^)]* captures "SS_COMPLAINTS_(" and every line then looks wrong.
+  const args = [];
+  const re = /SpreadsheetApp\.openById\(/g;
+  for (let m; (m = re.exec(s)); ) {
+    let i = re.lastIndex, depth = 1;
+    const start = i;
+    while (i < s.length && depth > 0) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')') depth--;
+      if (depth > 0) i++;
+    }
+    args.push(s.slice(start, i).trim());
+  }
+  // Either named straight from Config, or `id` — the parameter of
+  // _mpReadBook_, which exists because the manpower reader is called once per
+  // area. Its callers are checked below.
+  t('Dashboard opens no workbook Config does not name',
+    args.filter(a => !/^SS_[A-Z_]+_\(\)$/.test(a) && a !== 'id'), []);
+  t('and the manpower reader is fed from Config, not from anywhere else',
+    (s.match(/_mpReadBook_\((kId|dId), '(kitchen|dispatch)'\)/g) || []).length, 2);
+  t('with those two ids coming from the manpower accessors',
+    /var kId = SS_MP_KITCHEN_\(\), dId = SS_MP_DISPATCH_\(\);/.test(s), true);
+}
 
 // ── no delivery figures to prove a filter against ───────────
 {

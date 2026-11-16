@@ -8,6 +8,7 @@ shipped file changes, these run against the change.
     node tests/filter.test.js         # which rows count as a delivery
     node tests/sync-window.test.js    # the Sunday-to-Saturday window
     node tests/year-rollover.test.js  # any column, and the turn of the year
+    node tests/manpower.test.js       # agency cost, and projecting a part-month
     node tests/template-neutral.test.js   # template/ carries no market's data
 
 `sync-window.test.js` also covers `caloCheckHistory()`, which is read-only.
@@ -33,6 +34,17 @@ blanked so no 2025 figure survives the copy, February stopping at the 28th and
 at the 29th in a leap year. It also covers `caloEnsureYear()` refusing a year
 older than the tab, refusing a two-digit year, and doing nothing when asked for
 a year already there.
+
+`manpower.test.js` covers the outsourced-manpower reader and the month-end
+projection. It pulls the server block out of `Dashboard.gs` and `_mpProject_`
+out of `Index.html` rather than keeping a copy, so both run against the shipped
+code. It fixes the sheets' own quirks in place — `"01-Oct-2026"` text dates, a
+double shift being one head and two shifts, a punch nobody closed — and pins the
+projection: days up to the last logged one are actual, with a missing one
+counted as a genuine zero rather than guessed at, and only the days beyond that
+are filled in from the same weekday earlier in the month. One case records what
+the flat run-rate would have said instead (5400 against 5340), which is the
+whole reason the weekday split is there.
 
 `template-neutral.test.js` is the odd one out: it reads files rather than
 running the code. It proves `template/` holds no UAE workbook id, no delivery

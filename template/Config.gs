@@ -69,7 +69,18 @@ var CFG = {
 
     // The gid of the "DOD Complaint" tab INSIDE the complaints workbook.
     // Open that tab and read the number after #gid= in the address bar.
-    dodGid:     0
+    dodGid:     0,
+
+    // ── Outsourced manpower (optional) ──────────────────────
+    // Agency attendance workbooks, one per area. Each needs an "Attendance"
+    // tab carrying Shift Date, Company, Hours, OT, Rate and Cost.
+    //
+    // Unlike the three ids above, a blank one here is a choice rather than a
+    // fault: that half of the manpower section simply does not appear, and
+    // nothing else on the dashboard is affected. A market with no agency
+    // staff leaves both empty.
+    manpowerKitchen:  '',
+    manpowerDispatch: ''
   },
 
   // ── Who can administer this dashboard ──────────────────────
@@ -112,6 +123,19 @@ function _cfgId_(which) {
   }
   return id;
 }
+
+/**
+ * An optional id. _cfgId_ throws, because a dashboard with no financial
+ * workbook is broken; this returns '' instead, because a market with no
+ * agency staff is not. Callers check for '' and leave the section out.
+ */
+function _cfgOpt_(which) {
+  var id = (_cfg_().src || {})[which];
+  return (typeof id === 'string' && id.length >= 20) ? id : '';
+}
+
+function SS_MP_KITCHEN_()  { return _cfgOpt_('manpowerKitchen'); }
+function SS_MP_DISPATCH_() { return _cfgOpt_('manpowerDispatch'); }
 
 function SS_FINANCIAL_()      { return _cfgId_('financial'); }
 function SS_COMPLAINTS_()     { return _cfgId_('complaints'); }

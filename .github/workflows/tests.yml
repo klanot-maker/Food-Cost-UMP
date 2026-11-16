@@ -41,5 +41,8 @@ jobs:
       - name: Any column, and the turn of the year
         run: node tests/year-rollover.test.js
 
+      - name: Agency manpower cost and the month-end projection
+        run: node tests/manpower.test.js
+
       - name: template/ carries no market's data
         run: node tests/template-neutral.test.js

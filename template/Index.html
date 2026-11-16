@@ -1312,14 +1312,71 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
           <div id="staffDeptDrillBody" style="padding:0 20px 20px;"></div>
         </div>
       </div>
-      <div class="slbl">Full daily data — production staff count</div>
-      <div class="tbl-card">
-        <div class="tbl-hdr"><div class="tbl-title">Daily staff log</div><span class="tbl-badge">All departments</span></div>
-        <table class="dtbl full-tbl">
-          <thead><tr><th>Date</th><th>Perm Staff</th><th>On Duty</th><th>Off Duty</th><th>Ann. Leave</th><th>Sick</th><th>Supplier</th><th>Total On Duty</th><th>Delivery Date</th><th>Total Del.</th><th>Del/Staff</th><th></th></tr></thead>
-          <tbody id="staffFullBody"></tbody>
-        </table>
-        <div class="tbl-foot"><span class="ftot" id="staffFullTot">—</span><span class="fcnt">All departments</span></div>
+      <!-- ══ OUTSOURCED MANPOWER COST ══ -->
+      <div id="mpSection">
+        <div class="lgc-card" style="margin-bottom:18px;">
+          <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end;">
+            <div>
+              <div class="lgc-ctl-lbl">Month</div>
+              <select id="mpMonth" class="lgc-input" style="min-width:170px;" onchange="_mpPickMonth(this.value)"></select>
+              <span id="mpMonthReset" onclick="_mpResetMonth()" style="display:none;margin-left:8px;font-size:11px;font-weight:700;color:var(--br);cursor:pointer;text-decoration:underline;">back to current month</span>
+            </div>
+            <div>
+              <div class="lgc-ctl-lbl">Target (cost / delivery)</div>
+              <input id="mpTarget" class="lgc-input" type="number" step="0.01" min="0" value="2.50" style="width:110px;" oninput="_mpSave();renderManpower()"/>
+            </div>
+            <div>
+              <div class="lgc-ctl-lbl">Area</div>
+              <select id="mpArea" class="lgc-input" style="min-width:150px;" onchange="renderManpower()">
+                <option value="all">Kitchen + Dispatch</option>
+                <option value="kitchen">Kitchen only</option>
+                <option value="dispatch">Dispatch only</option>
+              </select>
+            </div>
+            <div class="lgc-note" style="flex:1;min-width:250px;">
+              Agency cost comes from the <b>Attendance</b> tab of each manpower workbook, one row
+              per shift, at the rate each shift was costed at. Days still to come are projected
+              from the same weekday earlier in the month, because agency staffing drops at the
+              weekend and a flat daily average would read high or low depending on today's date.
+              <div id="mpCovHint" style="margin-top:5px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="lgc-sec-title">📌 Month to Date</div>
+        <div id="mpMtdVerdict"></div>
+        <div class="ops-complaints-row" id="mpMtdTiles" style="grid-template-columns:repeat(5,1fr)!important;"></div>
+
+        <div class="lgc-sec-title" style="margin-top:22px;">🔮 Projected Month End</div>
+        <div id="mpProjVerdict"></div>
+        <div class="ops-complaints-row" id="mpProjTiles" style="grid-template-columns:repeat(5,1fr)!important;"></div>
+
+        <div class="lgc-sec-title" style="margin-top:22px;">🏢 Cost by Supplier</div>
+        <div class="lgc-card"><div id="mpSupplier"></div></div>
+
+        <div class="lgc-sec-title" style="margin-top:22px;">📅 Daily Breakdown</div>
+        <div class="lgc-card"><div id="mpDaily"></div></div>
+      </div>
+
+      <!-- The daily log opens from the tiles above rather than sitting open
+           under them: it runs to thirty-odd rows per department and most
+           visits to this page are for the summary. -->
+      <div id="staffDailyWrap" style="display:none;margin-top:22px;">
+        <div class="slbl">Full daily data — production staff count</div>
+        <div class="tbl-card">
+          <div class="tbl-hdr">
+            <div class="tbl-title">Daily staff log</div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span class="tbl-badge" id="staffLogBadge">All departments</span>
+              <button class="show-all-btn" onclick="_staffLogClose()">✕ Close</button>
+            </div>
+          </div>
+          <table class="dtbl full-tbl">
+            <thead><tr><th>Date</th><th>Perm Staff</th><th>On Duty</th><th>Off Duty</th><th>Ann. Leave</th><th>Sick</th><th>Supplier</th><th>Total On Duty</th><th>Delivery Date</th><th>Total Del.</th><th>Del/Staff</th><th></th></tr></thead>
+            <tbody id="staffFullBody"></tbody>
+          </table>
+          <div class="tbl-foot"><span class="ftot" id="staffFullTot">—</span><span class="fcnt">All departments</span></div>
+        </div>
       </div>
     </div>
 
@@ -1782,6 +1839,12 @@ function showPage(id) {
   if(id==='staff'){
     document.getElementById('dtLbl').textContent=_rangeLbl;
     if(DATA.staff&&DATA.staff.sections)renderStaff(DATA.staff);
+    // The manpower workbooks are fetched on the first visit to this page
+    // rather than with the rest of the dashboard — two more workbooks and
+    // several thousand shift rows that no other page needs.
+    _mpInit();
+    renderManpower();
+    if(!_mpLoaded&&!_mpLoading) _mpLoad(renderManpower);
   }
   if(id==='capacity'){
     document.getElementById('dtLbl').textContent='Capacity Overview';
@@ -4174,6 +4237,11 @@ function filterStaffDept(deptName){
   var shown=filtered.reduce(function(t,s){return t+s.rows.length;},0);
   document.getElementById('staffFullTot').textContent='Showing '+shown+' recorded days'
     +(_activeStaffDept?' · '+_activeStaffDept:'');
+  // The existing toggle already clears the filter when the same tile is
+  // clicked twice, so following it gives the log the behaviour you would
+  // expect: open on that department, click again to put it away.
+  _staffLogOpen=!!_activeStaffDept;
+  _staffLogSync_();
 }
 
 function clearComplaintsFilter(){
@@ -4320,6 +4388,317 @@ function _buildStaffKpiCards(sections, mode, selDdStr, dateLbl){
   }).join('');
 }
 
+// ════════════════════════════════════════════════════════════
+// OUTSOURCED MANPOWER COST
+// ════════════════════════════════════════════════════════════
+// Agency staff, costed from the Attendance tab of each manpower workbook.
+// Loaded when the Staff page is first opened rather than with the rest of the
+// dashboard: it is two more workbooks and several thousand rows, and most of
+// the dashboard never needs it.
+
+var MP_DATA=null, _mpLoaded=false, _mpLoading=false, _mpErr=null;
+var _mpPrefsLoaded=false, _mpUserPickedMonth=false, _mpPickedYM=null;
+
+function _mpCurrentYM(){
+  var d=new Date();
+  return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2);
+}
+
+function _mpSave(){
+  try{ localStorage.setItem('mpTarget',document.getElementById('mpTarget').value); }catch(e){}
+}
+
+function _mpPickMonth(ym){
+  _mpUserPickedMonth=true; _mpPickedYM=ym;
+  _mpSyncMonthReset(); renderManpower();
+}
+function _mpResetMonth(){
+  _mpUserPickedMonth=false; _mpPickedYM=null;
+  _mpInit(); renderManpower();
+}
+function _mpSyncMonthReset(){
+  var el=document.getElementById('mpMonthReset'), sel=document.getElementById('mpMonth');
+  if(el) el.style.display=(sel&&sel.value&&sel.value!==_mpCurrentYM())?'inline':'none';
+}
+
+/** Every day-by-company row from both books, tagged with its area. */
+function _mpAllRows(){
+  var out=[];
+  ['kitchen','dispatch'].forEach(function(area){
+    var b=MP_DATA&&MP_DATA[area];
+    if(!b||!b.rows) return;
+    b.rows.forEach(function(r){
+      out.push({area:area,ds:r.ds,company:r.company,staff:r.staff,shifts:r.shifts,
+                hours:r.hours,ot:r.ot,cost:r.cost,attention:r.attention});
+    });
+  });
+  return out;
+}
+
+function _mpInit(){
+  if(!_mpPrefsLoaded){
+    _mpPrefsLoaded=true;
+    try{
+      var t=localStorage.getItem('mpTarget');
+      if(t!==null&&t!=='') document.getElementById('mpTarget').value=t;
+    }catch(e){}
+  }
+  var months={};
+  _mpAllRows().forEach(function(r){ if(r.ds) months[r.ds.substring(0,7)]=1; });
+  var nowYM=_mpCurrentYM();
+  months[nowYM]=1;                      // offered even with nothing logged yet
+
+  var keys=Object.keys(months).sort().reverse();
+  var sel=document.getElementById('mpMonth');
+  if(!sel) return;
+  sel.innerHTML=keys.map(function(k){
+    var p=k.split('-');
+    return '<option value="'+k+'">'+MO_LNG[parseInt(p[1],10)-1]+' '+p[0]+(k===nowYM?' (current)':'')+'</option>';
+  }).join('');
+  var want=(_mpUserPickedMonth&&_mpPickedYM&&keys.indexOf(_mpPickedYM)!==-1)?_mpPickedYM:nowYM;
+  sel.value=want||keys[0];
+  _mpSyncMonthReset();
+}
+
+function _mpLoad(cb){
+  if(_mpLoading) return;
+  // The page can be drawn before the Apps Script bridge exists — the local
+  // cache paints from localStorage on open — so this follows refreshData and
+  // checks rather than assuming. Without it, opening the Staff page in that
+  // state threw and took the rest of the page's rendering down with it.
+  if(typeof google==='undefined'||!google.script){
+    _mpErr='The Apps Script connection is not available yet — press Refresh.';
+    _mpLoaded=true;
+    if(cb) cb();
+    return;
+  }
+  _mpLoading=true;
+  google.script.run
+    .withSuccessHandler(function(r){
+      MP_DATA=r||null; _mpLoaded=true; _mpLoading=false; _mpErr=null;
+      _mpInit(); if(cb) cb();
+    })
+    .withFailureHandler(function(e){
+      _mpLoading=false; _mpLoaded=true;
+      _mpErr=(e&&e.message)||'Could not load the manpower workbooks.';
+      if(cb) cb();
+    })
+    .getManpowerData(false);
+}
+
+function _mpWeekday_(ds){
+  var p=ds.split('-');
+  return new Date(parseInt(p[0],10),parseInt(p[1],10)-1,parseInt(p[2],10)).getDay();
+}
+
+/**
+ * Project a month's total from the days logged so far, weekday by weekday.
+ *
+ * A flat run-rate assumes every remaining day looks like the average day,
+ * which agency staffing does not: On Time ran 23 staff on Tue 3 Nov and 9 on
+ * Fri 6 Nov. Whether a flat projection reads high or low then depends on how
+ * many weekend days happen to have passed — the number moves for a reason
+ * that has nothing to do with the operation.
+ *
+ * Days up to the last one with data count as actual, missing ones included as
+ * zero: a past day with no punches genuinely cost nothing. Only days beyond
+ * that are filled in, each from its own weekday's average.
+ */
+function _mpProject_(byDay, ym, daysInMonth){
+  var sums={}, counts={}, total=0, days=0, lastDay=0;
+  Object.keys(byDay).forEach(function(ds){
+    var wd=_mpWeekday_(ds), d=parseInt(ds.substring(8),10);
+    sums[wd]=(sums[wd]||0)+byDay[ds];
+    counts[wd]=(counts[wd]||0)+1;
+    total+=byDay[ds]; days++;
+    if(d>lastDay) lastDay=d;
+  });
+  if(!days) return {total:0, actual:0, projectedDays:0, days:0, basis:'nothing logged yet'};
+
+  var overall=total/days, projected=total, filled=0;
+  for(var d2=lastDay+1; d2<=daysInMonth; d2++){
+    var ds2=ym+'-'+('0'+d2).slice(-2);
+    var wd2=_mpWeekday_(ds2);
+    projected += counts[wd2] ? (sums[wd2]/counts[wd2]) : overall;
+    filled++;
+  }
+  return {total:projected, actual:total, projectedDays:filled, days:days,
+          basis: filled
+            ? (days+' day'+(days===1?'':'s')+' logged · '+filled+' projected by weekday')
+            : (days+' day'+(days===1?'':'s')+' logged · month complete')};
+}
+
+function _mpAreaLbl(a){ return a==='kitchen'?'Kitchen':a==='dispatch'?'Dispatch':'Kitchen + Dispatch'; }
+
+function renderManpower(){
+  var sec=document.getElementById('mpSection');
+  if(!sec) return;
+
+  // Not configured at all — say so once rather than drawing empty tiles that
+  // look like a market with no agency spend.
+  if(MP_DATA&&MP_DATA.configured===false){
+    sec.innerHTML='<div class="lgc-card" style="color:var(--mut);font-size:12.5px;">'
+      +'<b>Outsourced manpower is not configured.</b><br>Add <code>manpowerKitchen</code> and/or '
+      +'<code>manpowerDispatch</code> to <code>src</code> in Config.gs, then run <code>cfgSelfTest()</code>.'
+      +'</div>';
+    return;
+  }
+  if(!_mpLoaded){
+    document.getElementById('mpCovHint').innerHTML='<span style="color:var(--br);font-weight:700;">Loading manpower data…</span>';
+    return;
+  }
+
+  var ym=(document.getElementById('mpMonth')||{}).value||_mpCurrentYM();
+  var area=(document.getElementById('mpArea')||{}).value||'all';
+  var target=parseFloat(document.getElementById('mpTarget').value);
+  if(isNaN(target)||target<0) target=0;
+
+  var rows=_mpAllRows().filter(function(r){
+    return r.ds&&r.ds.substring(0,7)===ym&&(area==='all'||r.area===area);
+  });
+
+  var p=ym.split('-');
+  var daysInMonth=new Date(parseInt(p[0],10),parseInt(p[1],10),0).getDate();
+
+  var cost=0,hours=0,ot=0,shifts=0,attention=0;
+  var byDay={}, byDayStaff={}, bySupplier={}, dayStaff={};
+  rows.forEach(function(r){
+    cost+=r.cost; hours+=r.hours; ot+=r.ot; shifts+=r.shifts; attention+=r.attention;
+    byDay[r.ds]=(byDay[r.ds]||0)+r.cost;
+    // Headcount is already distinct within a day-and-company bucket. Summing
+    // across companies can double-count anyone working for two agencies in a
+    // day, which is rare enough to accept and the alternative — shipping every
+    // employee id to the browser — is not worth it for a headline tile.
+    dayStaff[r.ds]=(dayStaff[r.ds]||0)+r.staff;
+    var k=r.area+'|'+r.company;
+    if(!bySupplier[k]) bySupplier[k]={area:r.area,company:r.company,cost:0,hours:0,ot:0,shifts:0,attention:0,days:{}};
+    var s=bySupplier[k];
+    s.cost+=r.cost; s.hours+=r.hours; s.ot+=r.ot; s.shifts+=r.shifts; s.attention+=r.attention;
+    s.days[r.ds]=1;
+  });
+
+  var delRecs=((DATA.deliveries&&DATA.deliveries.records)||[])
+    .filter(function(r){return r.dateStr&&r.dateStr.substring(0,7)===ym;});
+  var deliveries=0, delByDay={}, delDays=0;
+  delRecs.forEach(function(r){
+    if((r.actual||0)>0){ deliveries+=r.actual; delByDay[r.dateStr]=r.actual; delDays++; }
+  });
+
+  var hasData=cost>0&&deliveries>0;
+  var ratio=hasData?(cost/deliveries):0;
+  var loggedDays=Object.keys(byDay).length;
+
+  var why='No manpower data for this month yet.';
+  if(_mpErr) why=_mpErr;
+  else if(cost<=0&&deliveries>0) why='No agency shifts found for '+_mpAreaLbl(area)+' in this month — deliveries loaded fine ('+deliveries.toLocaleString()+').';
+  else if(cost>0&&deliveries<=0) why='Agency cost loaded, but no deliveries found for this month in the DELIVERIES sheet.';
+
+  // Anything not COMPLETE is a punch nobody closed; its cost is provisional.
+  var hint=[];
+  ['kitchen','dispatch'].forEach(function(a){
+    var b=MP_DATA&&MP_DATA[a];
+    if(b&&b.error) hint.push('<span style="color:var(--red);font-weight:700;">'+_mpAreaLbl(a)+': '+b.error+'</span>');
+  });
+  if(attention>0) hint.push('<b>'+attention+'</b> shift'+(attention===1?'':'s')+' still open (missing punch) — their cost is provisional.');
+  document.getElementById('mpCovHint').innerHTML=hint.join('<br>');
+
+  document.getElementById('mpMtdVerdict').innerHTML=
+    _lgcVerdict('Month to date — '+_mpAreaLbl(area),ratio,target,
+      loggedDays+' day'+(loggedDays===1?'':'s')+' logged · '+shifts.toLocaleString()+' shifts · '
+      +delDays+' day'+(delDays===1?'':'s')+' of deliveries',hasData,why);
+
+  var avgStaff=loggedDays?Math.round(Object.keys(dayStaff).reduce(function(t,k){return t+dayStaff[k];},0)/loggedDays):0;
+  document.getElementById('mpMtdTiles').innerHTML=
+     _lgcTile('Manpower Cost',_lgcMoney(cost),CUR+' · '+_mpAreaLbl(area),'')
+    +_lgcTile('Hours',_lgcMoney(hours),shifts.toLocaleString()+' shifts','')
+    +_lgcTile('Overtime Hours',_lgcMoney(ot),hours>0?(Math.round(ot/hours*1000)/10)+'% of hours':'—','')
+    +_lgcTile('Avg Staff / Day',avgStaff.toLocaleString(),loggedDays+' day'+(loggedDays===1?'':'s')+' logged','')
+    +_lgcTile('Cost / Delivery',hasData?_lgcMoney(ratio):'—','target '+_lgcMoney(target),
+              hasData?(ratio>target?'#D94040':'#00C07F'):'');
+
+  // ── Projected month end, weekday by weekday ──
+  var projCost=_mpProject_(byDay,ym,daysInMonth);
+  var projDel =_mpProject_(delByDay,ym,daysInMonth);
+  var projHas=projCost.total>0&&projDel.total>0;
+  var projRatio=projHas?(projCost.total/projDel.total):0;
+
+  document.getElementById('mpProjVerdict').innerHTML=
+    _lgcVerdict(projCost.projectedDays?'Projected month end':'Month end (complete)',
+      projRatio,target,projCost.basis,projHas,why);
+  document.getElementById('mpProjTiles').innerHTML=
+     _lgcTile('Proj. Manpower Cost',_lgcMoney(projCost.total),
+              projCost.projectedDays?('+'+_lgcMoney(projCost.total-projCost.actual)+' still to come'):'month complete','')
+    +_lgcTile('Days Projected',String(projCost.projectedDays),
+              projCost.projectedDays?'by same weekday':'none — month complete','')
+    +_lgcTile('Proj. Deliveries',Math.round(projDel.total).toLocaleString(),
+              projDel.projectedDays?'by same weekday':'actual','')
+    +_lgcTile('Month Length',daysInMonth+' days',MO_LNG[parseInt(p[1],10)-1]+' '+p[0],'')
+    +_lgcTile('Proj. Cost / Delivery',projHas?_lgcMoney(projRatio):'—','target '+_lgcMoney(target),
+              projHas?(projRatio>target?'#D94040':'#00C07F'):'');
+
+  // ── By supplier ──
+  var sups=Object.keys(bySupplier).map(function(k){return bySupplier[k];})
+    .sort(function(a,b){return b.cost-a.cost;});
+  if(!sups.length){
+    document.getElementById('mpSupplier').innerHTML='<div style="color:var(--lt);font-size:12.5px;padding:6px 0;">No agency shifts recorded for this month.</div>';
+  } else {
+    var sh='<table class="lgc-tbl"><thead><tr><th>Supplier</th><th>Area</th><th class="num">Days</th>'
+      +'<th class="num">Shifts</th><th class="num">Hours</th><th class="num">OT</th>'
+      +'<th class="num">Cost ('+CUR+')</th><th class="num">Share</th></tr></thead><tbody>';
+    sups.forEach(function(s){
+      sh+='<tr><td><b>'+s.company+'</b></td><td>'+_mpAreaLbl(s.area)+'</td>'
+        +'<td class="num">'+Object.keys(s.days).length+'</td>'
+        +'<td class="num">'+s.shifts.toLocaleString()+'</td>'
+        +'<td class="num">'+_lgcMoney(s.hours)+'</td>'
+        +'<td class="num">'+_lgcMoney(s.ot)+'</td>'
+        +'<td class="num"><b>'+_lgcMoney(s.cost)+'</b></td>'
+        +'<td class="num">'+(cost>0?(Math.round(s.cost/cost*1000)/10)+'%':'—')+'</td></tr>';
+    });
+    sh+='</tbody><tfoot><tr><td><b>TOTAL</b></td><td></td><td class="num">'+loggedDays+'</td>'
+      +'<td class="num">'+shifts.toLocaleString()+'</td><td class="num">'+_lgcMoney(hours)+'</td>'
+      +'<td class="num">'+_lgcMoney(ot)+'</td><td class="num"><b>'+_lgcMoney(cost)+'</b></td>'
+      +'<td class="num">100%</td></tr></tfoot></table>';
+    document.getElementById('mpSupplier').innerHTML=sh;
+  }
+
+  // ── Daily breakdown ──
+  var days=Object.keys(byDay).sort();
+  if(!days.length){
+    document.getElementById('mpDaily').innerHTML='<div style="color:var(--lt);font-size:12.5px;padding:6px 0;">Nothing logged for this month.</div>';
+  } else {
+    var WD=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    var dh='<table class="lgc-tbl"><thead><tr><th>Date</th><th class="num">Staff</th>'
+      +'<th class="num">Cost ('+CUR+')</th><th class="num">Deliveries</th>'
+      +'<th class="num">Cost / Delivery</th></tr></thead><tbody>';
+    days.forEach(function(ds){
+      var dd=delByDay[ds]||0, c=byDay[ds]||0;
+      var r=dd>0?(c/dd):0;
+      dh+='<tr><td>'+WD[_mpWeekday_(ds)]+' '+ds.substring(8)+' '+MO_SHT[parseInt(ds.substring(5,7),10)-1]+'</td>'
+        +'<td class="num">'+(dayStaff[ds]||0)+'</td>'
+        +'<td class="num">'+_lgcMoney(c)+'</td>'
+        +'<td class="num">'+(dd?dd.toLocaleString():'—')+'</td>'
+        +'<td class="num"'+(dd&&r>target?' style="color:var(--red);font-weight:700;"':'')+'>'
+        +(dd?_lgcMoney(r):'—')+'</td></tr>';
+    });
+    dh+='</tbody></table>';
+    document.getElementById('mpDaily').innerHTML=dh;
+  }
+}
+
+// ── The daily staff log, opened from the tiles ──────────────
+var _staffLogOpen=false;
+
+function _staffLogSync_(){
+  var el=document.getElementById('staffDailyWrap');
+  if(el) el.style.display=_staffLogOpen?'':'none';
+  var b=document.getElementById('staffLogBadge');
+  if(b) b.textContent=_activeStaffDept||'All departments';
+}
+function _staffLogClose(){
+  _staffLogOpen=false;
+  _staffLogSync_();
+}
+
 function renderStaff(d){
   if(!d||d.error){console.warn('Staff error:',d&&d.error);return;}
   var allSections=d.sections||[];
@@ -4434,6 +4813,10 @@ function renderStaff(d){
     +' recorded days'
     +(_activeStaffDept?' · '+_activeStaffDept:'')
     +' across '+sheetCount+' sheet(s)';
+
+  // Re-rendering fills the table but must not force it open: whether the log
+  // is showing is the tiles' business, and it survives a refresh.
+  _staffLogSync_();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -5646,6 +6029,21 @@ function refreshData(){
     _rp.staff=r; _staffPhase=(r&&r.staff&&r.staff.sections)?'ready':'failed'; _rMerge();
   }).withFailureHandler(function(e){ _staffPhase='failed'; _rFail(e); }).getStaffPageData(true);
   google.script.run.withSuccessHandler(function(r){_rp.ops=r;_rMerge();}).withFailureHandler(_rFail).getOperationOverviewData(true);
+
+  // Manpower refreshes only for a session that has already opened the Staff
+  // page. Pressing Refresh elsewhere should not pull two more workbooks and
+  // several thousand shift rows that nothing on screen is showing. It is also
+  // kept out of _rMerge, so a manpower workbook that is slow or unreachable
+  // cannot hold up the four phases the rest of the dashboard waits on.
+  if(_mpLoaded){
+    google.script.run
+      .withSuccessHandler(function(r){ MP_DATA=r||null; _mpErr=null; _mpInit(); renderManpower(); })
+      .withFailureHandler(function(e){
+        _mpErr=(e&&e.message)||'Could not reload the manpower workbooks.';
+        renderManpower();
+      })
+      .getManpowerData(true);
+  }
 }
 
 function _startAutoRefresh(){
@@ -7534,8 +7932,12 @@ function _deptColor(name){
   return 'var(--br)';
 }
 function showStaffDeptDrilldown(){
+  // The Total tile toggles the log like any other tile: open it on all
+  // departments, or close it if that is already what it is showing.
+  _staffLogOpen=!(_staffLogOpen&&!_activeStaffDept);
   // Reset dept filter so table shows all depts
   _activeStaffDept=null;
+  _staffLogSync_();
   document.querySelectorAll('[id^="staffkpi_"]').forEach(function(e){e.classList.remove('act');});
   var totEl=document.getElementById('staffkpi_total'); if(totEl)totEl.classList.add('act');
   var sections=_visibleStaffSections();

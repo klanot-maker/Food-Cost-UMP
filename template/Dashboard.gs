@@ -39,6 +39,7 @@ var _CACHE_STAFF = 'ump_staff_v1';
 // payload cached under the old key has the wrong shape and must be dropped.
 var _CACHE_OPS   = 'ump_ops_v3';
 var _CACHE_INV   = 'ump_loginv_v1';
+var _CACHE_MP    = 'ump_manpower_v1';
 // Bumped whenever the invoice reader changes. The page shows it next to its
 // own copy, so a dashboard running an older deployment is obvious at a glance
 // instead of looking like a bug in the data.
@@ -217,6 +218,136 @@ function getStaffPageData(force) {
   var data = {
     staff:        getStaffData(ss),
     staffSummary: getStaffSummaryData(ss)
+  };
+  _cachePut_(_ck, data);
+  return data;
+}
+
+// ============================================================
+// OUTSOURCED MANPOWER — agency staff cost
+// ============================================================
+// Read from each workbook's "Attendance" tab, deliberately NOT from its
+// per-company "Cost Summary" tabs. Those are filtered by a From/To that the
+// sheet's own users type into B4/B5, so what they report depends on who last
+// opened them — at the time of writing Kitchen's OnTime tab sat on September
+// and read zero while Dispatch's sat on November and read real figures. A
+// dashboard built on them would have shown a stale filter as missing cost.
+//
+// Attendance carries one row per shift with Rate and Cost already frozen at
+// the moment the shift was costed, which is what the agency invoices against.
+// So there is no costing logic to reproduce here: the cost column is summed.
+
+// 0-based, matching the Attendance header row:
+//   Shift Date | Employee ID | Full Name | Company | Punch In | Punch Out |
+//   Hours | OT | Short | Rate | Cost | Status | Role | Flags | Notes | ...
+var _MP_COL = { date:0, empId:1, company:3, hours:6, ot:7, rate:9, cost:10, status:11 };
+
+var _MP_MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+
+/** 'YYYY-MM-DD' from a real Date or from the sheet's "01-Oct-2026" text. */
+function _mpDateStr_(v) {
+  if (v instanceof Date && !isNaN(v)) {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  var s = String(v || '').trim();
+  if (!s) return '';
+  var m = s.match(/^(\d{1,2})[-\/\s]([A-Za-z]{3})[A-Za-z]*[-\/\s](\d{4})$/);
+  if (m) {
+    var mo = _MP_MONTHS[m[2].toLowerCase()];
+    if (mo === undefined) return '';
+    return m[3] + '-' + ('0' + (mo + 1)).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+  }
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);          // already ISO
+  return m ? m[1] + '-' + m[2] + '-' + m[3] : '';
+}
+
+/** Numbers arrive as numbers, or as text with thousands separators. */
+function _mpNum_(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  var n = parseFloat(String(v == null ? '' : v).replace(/,/g, ''));
+  return isFinite(n) ? n : 0;
+}
+
+/**
+ * One workbook's Attendance tab, aggregated to one row per day per company.
+ * Per-shift rows would be tens of thousands across both books; the page only
+ * ever draws days and suppliers, so the rows are folded here rather than
+ * shipped to the browser and folded there.
+ */
+function _mpReadBook_(id, area) {
+  if (!id) return { rows: [], companies: [], skipped: 'not configured' };
+
+  var sh;
+  try {
+    sh = SpreadsheetApp.openById(id).getSheetByName('Attendance');
+  } catch (e) {
+    return { rows: [], companies: [], error: 'cannot open the ' + area +
+             ' manpower workbook: ' + e.message };
+  }
+  if (!sh) {
+    return { rows: [], companies: [], error: 'no tab called "Attendance" in the ' +
+             area + ' manpower workbook' };
+  }
+
+  var all = sh.getDataRange().getValues();
+  if (all.length < 2) return { rows: [], companies: [] };
+
+  var buckets = {}, seen = {}, companies = {};
+  for (var r = 1; r < all.length; r++) {
+    var row = all[r];
+    var ds  = _mpDateStr_(row[_MP_COL.date]);
+    if (!ds) continue;
+    var company = String(row[_MP_COL.company] || '').trim();
+    if (!company) continue;
+
+    companies[company] = 1;
+    var key = ds + '|' + company;
+    if (!buckets[key]) {
+      buckets[key] = { ds: ds, company: company, staff: 0, shifts: 0,
+                       hours: 0, ot: 0, cost: 0, attention: 0 };
+      seen[key] = {};
+    }
+    var b = buckets[key];
+    b.shifts++;
+    b.hours += _mpNum_(row[_MP_COL.hours]);
+    b.ot    += _mpNum_(row[_MP_COL.ot]);
+    b.cost  += _mpNum_(row[_MP_COL.cost]);
+
+    // One person working a double shift is one head, two shifts. Counting
+    // rows would quietly inflate headcount on exactly the busy days.
+    var emp = String(row[_MP_COL.empId] || '').trim();
+    if (emp && !seen[key][emp]) { seen[key][emp] = 1; b.staff++; }
+
+    // Anything not COMPLETE is a punch nobody has finished: its hours, and so
+    // its cost, are provisional. Counted and surfaced rather than dropped,
+    // because a day that is half unresolved should not read as a cheap day.
+    var st = String(row[_MP_COL.status] || '').trim().toUpperCase();
+    if (st && st !== 'COMPLETE') b.attention++;
+  }
+
+  var rows = Object.keys(buckets).map(function(k) { return buckets[k]; });
+  rows.sort(function(a, b) {
+    return a.ds === b.ds ? (a.company < b.company ? -1 : 1) : (a.ds < b.ds ? -1 : 1);
+  });
+  // Taken from the data, not from a fixed list. The workbooks carry a tab per
+  // agency including ones with no punches yet, and a hardcoded list would show
+  // those as a permanent zero row.
+  return { rows: rows, companies: Object.keys(companies).sort() };
+}
+
+function getManpowerData(force) {
+  var kId = SS_MP_KITCHEN_(), dId = SS_MP_DISPATCH_();
+  if (!kId && !dId) return { configured: false, kitchen: null, dispatch: null };
+
+  var _ck = _srcKey_(_CACHE_MP, [kId, dId]);
+  if (!force) {
+    var hit = _cacheGet_(_ck);
+    if (hit) return hit;
+  }
+  var data = {
+    configured: true,
+    kitchen:  kId ? _mpReadBook_(kId, 'kitchen')  : null,
+    dispatch: dId ? _mpReadBook_(dId, 'dispatch') : null
   };
   _cachePut_(_ck, data);
   return data;
