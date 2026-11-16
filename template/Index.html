@@ -1322,8 +1322,8 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
               <span id="mpMonthReset" onclick="_mpResetMonth()" style="display:none;margin-left:8px;font-size:11px;font-weight:700;color:var(--br);cursor:pointer;text-decoration:underline;">back to current month</span>
             </div>
             <div>
-              <div class="lgc-ctl-lbl">Target (cost / delivery)</div>
-              <input id="mpTarget" class="lgc-input" type="number" step="0.01" min="0" value="2.50" style="width:110px;" oninput="_mpSave();renderManpower()"/>
+              <div class="lgc-ctl-lbl">Target (deliveries / person)</div>
+              <input id="mpTarget" class="lgc-input" type="number" step="0.5" min="0" value="23" style="width:110px;" oninput="_mpSave();renderManpower()"/>
             </div>
             <div>
               <div class="lgc-ctl-lbl">Area</div>
@@ -1338,6 +1338,8 @@ body:not(.role-super-admin) .superadmin-only{display:none!important;}
               per shift, at the rate each shift was costed at. Days still to come are projected
               from the same weekday earlier in the month, because agency staffing drops at the
               weekend and a flat daily average would read high or low depending on today's date.
+              <b>Deliveries per person</b> divides real deliveries by everyone on duty — own staff
+              plus agency — across every department, and so covers more than the agency spend above it.
               <div id="mpCovHint" style="margin-top:5px;"></div>
             </div>
           </div>
@@ -4404,8 +4406,11 @@ function _mpCurrentYM(){
   return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2);
 }
 
+// A new key, not the old 'mpTarget'. That one held a cost-per-delivery target
+// of about 2.50; read back into a deliveries-per-person box it would look like
+// a plausible number and quietly fail every day.
 function _mpSave(){
-  try{ localStorage.setItem('mpTarget',document.getElementById('mpTarget').value); }catch(e){}
+  try{ localStorage.setItem('mpDelTarget',document.getElementById('mpTarget').value); }catch(e){}
 }
 
 function _mpPickMonth(ym){
@@ -4439,7 +4444,7 @@ function _mpInit(){
   if(!_mpPrefsLoaded){
     _mpPrefsLoaded=true;
     try{
-      var t=localStorage.getItem('mpTarget');
+      var t=localStorage.getItem('mpDelTarget');
       if(t!==null&&t!=='') document.getElementById('mpTarget').value=t;
     }catch(e){}
   }
@@ -4530,6 +4535,95 @@ function _mpProject_(byDay, ym, daysInMonth){
 
 function _mpAreaLbl(a){ return a==='kitchen'?'Kitchen':a==='dispatch'?'Dispatch':'Kitchen + Dispatch'; }
 
+/**
+ * Everyone on duty across every department for a month, in person-days — own
+ * staff and agency together. That is exactly what the staff sheet's "Total
+ * Staff On Duty" column already adds up (On Duty + Supplier Staff), so it is
+ * taken from there rather than recomputed.
+ *
+ * Deliveries are NOT taken from the staff sheet. Each department repeats the
+ * same deliveries in its own rows, so adding the departments up counts them
+ * four times over: November reads 272,128 against roughly 70,627 that actually
+ * went out. Real deliveries come from the DELIVERIES tab instead.
+ */
+function _mpStaffDaysFor(ym){
+  var p=ym.split('-'), moName=MO_LNG[parseInt(p[1],10)-1], yr=p[0];
+  var secs=((DATA.staff&&DATA.staff.sections)||[]).filter(function(s){
+    var n=s.sheetName||'';
+    return n.indexOf(moName)>=0&&n.indexOf(yr)>=0;
+  });
+  var seen={}, personDays=0, daysLogged=0;
+  secs.forEach(function(s){
+    if(seen[s.name]) return;                 // one entry per department
+    seen[s.name]=true;
+    personDays+=(_aggSectionMonth(s)||{}).tot||0;
+    var n=(s.rows||[]).length;
+    if(n>daysLogged) daysLogged=n;
+  });
+  return {personDays:personDays, daysLogged:daysLogged, depts:Object.keys(seen)};
+}
+
+/** The month before 'YYYY-MM'. */
+function _mpPrevYM(ym){
+  var p=ym.split('-');
+  var d=new Date(parseInt(p[0],10),parseInt(p[1],10)-2,1);
+  return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2);
+}
+
+/**
+ * Agency cost for a month, counting only days up to `lastDay`. Comparing a
+ * half-finished month against a whole one would show a fall every time.
+ */
+function _mpCostUpTo(ym, lastDay, area){
+  var t=0;
+  _mpAllRows().forEach(function(r){
+    if(!r.ds||r.ds.substring(0,7)!==ym) return;
+    if(area!=='all'&&r.area!==area) return;
+    if(parseInt(r.ds.substring(8),10)>lastDay) return;
+    t+=r.cost;
+  });
+  return t;
+}
+
+function _mpDelta(cur, prev){
+  if(!prev) return {pct:null, txt:'nothing logged a month ago to compare with'};
+  var pct=(cur-prev)/prev*100;
+  var up=pct>=0;
+  return {pct:pct, up:up,
+    txt:(up?'▲ +':'▼ ')+Math.abs(Math.round(pct*10)/10).toFixed(1)+'% vs the same days last month'};
+}
+
+/**
+ * The verdict banner for a figure where MORE is better, which is the opposite
+ * of the cost ratios on the Logistics page: falling short of 23 deliveries a
+ * head is the warning, not exceeding it.
+ */
+function _mpVerdict(title, value, target, note, hasData, why){
+  if(!hasData){
+    return '<div class="lgc-verdict" style="background:#FEF5E7;color:#8A5A08;border:1.5px solid #C07A10;">'
+      +'<div><div class="lgc-verdict-lbl">'+title+'</div>'
+      +'<div class="lgc-verdict-msg">'+(why||'No data for this month yet.')+'</div></div></div>';
+  }
+  var under=value<target;
+  var bg=under?'#D94040':'#00C07F';
+  var diff=Math.abs(value-target);
+  var pctOfTarget=target>0?(value/target*100):0;
+  var msg=under
+    ? 'BELOW target by '+_lgcMoney(diff)+' deliveries per person'
+    : 'At or above target — '+_lgcMoney(diff)+' per person above';
+  return '<div class="lgc-verdict" style="background:'+bg+';color:#fff;">'
+    +'<div style="min-width:150px;">'
+    +'<div class="lgc-verdict-lbl">'+title+' — deliveries / person</div>'
+    +'<div class="lgc-verdict-num">'+_lgcMoney(value)+'</div>'
+    +'</div>'
+    +'<div style="flex:1;min-width:220px;">'
+    +'<div class="lgc-verdict-msg">'+(under?'⚠️ ':'✅ ')+msg
+    +(target>0?(' ('+(Math.round(Math.abs(pctOfTarget-100)*10)/10)+'% '+(under?'under':'over')+')'):'')+'</div>'
+    +'<div class="lgc-verdict-sub">Target '+_lgcMoney(target)+' · running at '+(Math.round(pctOfTarget*10)/10)+'% of target'+(note?' · '+note:'')+'</div>'
+    +'<div class="lgc-bar"><div style="width:'+Math.max(0,Math.min(100,pctOfTarget))+'%;background:#fff;"></div></div>'
+    +'</div></div>';
+}
+
 function renderManpower(){
   var sec=document.getElementById('mpSection');
   if(!sec) return;
@@ -4584,14 +4678,29 @@ function renderManpower(){
     if((r.actual||0)>0){ deliveries+=r.actual; delByDay[r.dateStr]=r.actual; delDays++; }
   });
 
-  var hasData=cost>0&&deliveries>0;
-  var ratio=hasData?(cost/deliveries):0;
   var loggedDays=Object.keys(byDay).length;
+
+  // ── the blended productivity figure ──
+  // Deliveries per person covers the whole operation, own staff and agency
+  // together, so it is deliberately wider than the agency spend above it.
+  var sd=_mpStaffDaysFor(ym);
+  var perPerson=sd.personDays>0?(deliveries/sd.personDays):0;
+  var hasData=deliveries>0&&sd.personDays>0;
+
+  // ── this month against the last ──
+  var lastDay=0;
+  Object.keys(byDay).forEach(function(ds){
+    var d=parseInt(ds.substring(8),10); if(d>lastDay) lastDay=d;
+  });
+  var prevYM=_mpPrevYM(ym);
+  var prevCost=_mpCostUpTo(prevYM,lastDay||31,area);
+  var delta=_mpDelta(cost,prevCost);
+  var prevFull=_mpCostUpTo(prevYM,31,area);
 
   var why='No manpower data for this month yet.';
   if(_mpErr) why=_mpErr;
-  else if(cost<=0&&deliveries>0) why='No agency shifts found for '+_mpAreaLbl(area)+' in this month — deliveries loaded fine ('+deliveries.toLocaleString()+').';
-  else if(cost>0&&deliveries<=0) why='Agency cost loaded, but no deliveries found for this month in the DELIVERIES sheet.';
+  else if(deliveries<=0) why='No deliveries found for this month in the DELIVERIES sheet, so deliveries per person cannot be worked out.';
+  else if(sd.personDays<=0) why='No staff log found for '+MO_LNG[parseInt(p[1],10)-1]+' '+p[0]+', so there is no headcount to divide by. The staff sheet is named like "November : 2026".';
 
   // Anything not COMPLETE is a punch nobody closed; its cost is provisional.
   var hint=[];
@@ -4603,38 +4712,50 @@ function renderManpower(){
   document.getElementById('mpCovHint').innerHTML=hint.join('<br>');
 
   document.getElementById('mpMtdVerdict').innerHTML=
-    _lgcVerdict('Month to date — '+_mpAreaLbl(area),ratio,target,
-      loggedDays+' day'+(loggedDays===1?'':'s')+' logged · '+shifts.toLocaleString()+' shifts · '
-      +delDays+' day'+(delDays===1?'':'s')+' of deliveries',hasData,why);
+    _mpVerdict('Month to date',perPerson,target,
+      deliveries.toLocaleString()+' deliveries ÷ '+sd.personDays.toLocaleString()+' person-days across '
+      +sd.depts.length+' department'+(sd.depts.length===1?'':'s')+' · agency spend '+CUR+' '
+      +_lgcMoney(cost)+' '+delta.txt, hasData, why);
 
   var avgStaff=loggedDays?Math.round(Object.keys(dayStaff).reduce(function(t,k){return t+dayStaff[k];},0)/loggedDays):0;
   document.getElementById('mpMtdTiles').innerHTML=
      _lgcTile('Manpower Cost',_lgcMoney(cost),CUR+' · '+_mpAreaLbl(area),'')
-    +_lgcTile('Hours',_lgcMoney(hours),shifts.toLocaleString()+' shifts','')
-    +_lgcTile('Overtime Hours',_lgcMoney(ot),hours>0?(Math.round(ot/hours*1000)/10)+'% of hours':'—','')
-    +_lgcTile('Avg Staff / Day',avgStaff.toLocaleString(),loggedDays+' day'+(loggedDays===1?'':'s')+' logged','')
-    +_lgcTile('Cost / Delivery',hasData?_lgcMoney(ratio):'—','target '+_lgcMoney(target),
-              hasData?(ratio>target?'#D94040':'#00C07F'):'');
+    +_lgcTile('vs Last Month',delta.pct===null?'—':((delta.up?'+':'')+(Math.round(delta.pct*10)/10)+'%'),
+              prevCost>0?(CUR+' '+_lgcMoney(prevCost)+' over the same days'):'nothing to compare',
+              delta.pct===null?'':(delta.up?'#D94040':'#00C07F'))
+    +_lgcTile('Hours',_lgcMoney(hours),shifts.toLocaleString()+' shifts · OT '+_lgcMoney(ot),'')
+    +_lgcTile('Agency Staff / Day',avgStaff.toLocaleString(),loggedDays+' day'+(loggedDays===1?'':'s')+' logged','')
+    +_lgcTile('Deliveries / Person',hasData?_lgcMoney(perPerson):'—','target '+_lgcMoney(target),
+              hasData?(perPerson<target?'#D94040':'#00C07F'):'');
 
   // ── Projected month end, weekday by weekday ──
   var projCost=_mpProject_(byDay,ym,daysInMonth);
   var projDel =_mpProject_(delByDay,ym,daysInMonth);
-  var projHas=projCost.total>0&&projDel.total>0;
-  var projRatio=projHas?(projCost.total/projDel.total):0;
+  // Person-days are only logged daily, not by weekday pattern, so they are
+  // carried forward at the rate they have run at so far. Said plainly on the
+  // tile rather than dressed up as the same weekday method as the other two.
+  var projPersonDays=sd.daysLogged>0?(sd.personDays/sd.daysLogged*daysInMonth):0;
+  var projPerPerson=projPersonDays>0?(projDel.total/projPersonDays):0;
+  var projHas=projDel.total>0&&projPersonDays>0;
+  var projDelta=_mpDelta(projCost.total,prevFull);
 
   document.getElementById('mpProjVerdict').innerHTML=
-    _lgcVerdict(projCost.projectedDays?'Projected month end':'Month end (complete)',
-      projRatio,target,projCost.basis,projHas,why);
+    _mpVerdict(projCost.projectedDays?'Projected month end':'Month end (complete)',
+      projPerPerson,target,projCost.basis+' · projected agency spend '+CUR+' '
+      +_lgcMoney(projCost.total)+(prevFull>0?' against '+_lgcMoney(prevFull)+' last month':''),
+      projHas,why);
   document.getElementById('mpProjTiles').innerHTML=
      _lgcTile('Proj. Manpower Cost',_lgcMoney(projCost.total),
               projCost.projectedDays?('+'+_lgcMoney(projCost.total-projCost.actual)+' still to come'):'month complete','')
-    +_lgcTile('Days Projected',String(projCost.projectedDays),
-              projCost.projectedDays?'by same weekday':'none — month complete','')
+    +_lgcTile('vs Last Month',projDelta.pct===null?'—':((projDelta.up?'+':'')+(Math.round(projDelta.pct*10)/10)+'%'),
+              prevFull>0?(CUR+' '+_lgcMoney(prevFull)+' last month in full'):'nothing to compare',
+              projDelta.pct===null?'':(projDelta.up?'#D94040':'#00C07F'))
     +_lgcTile('Proj. Deliveries',Math.round(projDel.total).toLocaleString(),
               projDel.projectedDays?'by same weekday':'actual','')
-    +_lgcTile('Month Length',daysInMonth+' days',MO_LNG[parseInt(p[1],10)-1]+' '+p[0],'')
-    +_lgcTile('Proj. Cost / Delivery',projHas?_lgcMoney(projRatio):'—','target '+_lgcMoney(target),
-              projHas?(projRatio>target?'#D94040':'#00C07F'):'');
+    +_lgcTile('Proj. Person-Days',Math.round(projPersonDays).toLocaleString(),
+              sd.daysLogged?('at the rate of '+sd.daysLogged+' logged day'+(sd.daysLogged===1?'':'s')):'no staff log','')
+    +_lgcTile('Proj. Deliveries / Person',projHas?_lgcMoney(projPerPerson):'—','target '+_lgcMoney(target),
+              projHas?(projPerPerson<target?'#D94040':'#00C07F'):'');
 
   // ── By supplier ──
   var sups=Object.keys(bySupplier).map(function(k){return bySupplier[k];})
@@ -4677,8 +4798,10 @@ function renderManpower(){
         +'<td class="num">'+(dayStaff[ds]||0)+'</td>'
         +'<td class="num">'+_lgcMoney(c)+'</td>'
         +'<td class="num">'+(dd?dd.toLocaleString():'—')+'</td>'
-        +'<td class="num"'+(dd&&r>target?' style="color:var(--red);font-weight:700;"':'')+'>'
-        +(dd?_lgcMoney(r):'—')+'</td></tr>';
+        // Not coloured against the target: the target counts deliveries per
+        // person, and this column is agency money per delivery. Comparing the
+        // two would paint most days red for no reason.
+        +'<td class="num">'+(dd?_lgcMoney(r):'—')+'</td></tr>';
     });
     dh+='</tbody></table>';
     document.getElementById('mpDaily').innerHTML=dh;
