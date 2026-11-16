@@ -4649,8 +4649,12 @@ function _mpVerdict(title, value, target, note, hasData, why){
     return wrap('<span style="color:#B06A08;font-weight:700;">'+title+': no figure — </span>'
       +'<span style="color:var(--txt);">'+(why||'no data for this month yet.')+'</span>');
   }
-  var under=value<target;
-  var accent=under?'#C62828':'#00855A';
+  // 23 is a ceiling on how much work one person carries, not a floor to
+  // clear. Going over it means the operation is leaning on too few people, so
+  // OVER is the warning and under is fine. The opposite of how a cost ratio
+  // reads, and the opposite of what this said at first.
+  var over=value>target;
+  var accent=over?'#C62828':'#00855A';
   var pctOfTarget=target>0?(value/target*100):0;
   var diff=Math.abs(value-target);
   return wrap(
@@ -4658,8 +4662,8 @@ function _mpVerdict(title, value, target, note, hasData, why){
     +'<span style="color:'+accent+';font-weight:800;font-size:15px;margin:0 6px;">'+_lgcMoney(value)+'</span>'
     +'<span style="color:var(--txt);font-weight:600;">deliveries per person — </span>'
     +'<span style="color:'+accent+';font-weight:700;">'
-      +(under?'below the '+_lgcMoney(target)+' target by '+_lgcMoney(diff)
-             :'at or above the '+_lgcMoney(target)+' target, by '+_lgcMoney(diff))
+      +(over?'over the '+_lgcMoney(target)+' target by '+_lgcMoney(diff)
+            :'within the '+_lgcMoney(target)+' target, by '+_lgcMoney(diff))
       +'</span>'
     +'<span style="color:var(--lt);"> ('+(Math.round(pctOfTarget*10)/10)+'% of target)</span>'
     +(note?'<br><span style="color:var(--lt);">'+note+'</span>':''));
@@ -4812,7 +4816,7 @@ function renderManpower(){
     +_lgcTile('Agency Staff / Day',mpOk?avgStaff.toLocaleString():'—',
               mpOk?(loggedDays+' day'+(loggedDays===1?'':'s')+' logged'):'not loaded','')
     +_lgcTile('Deliveries / Person',hasData?_lgcMoney(perPerson):'—','target '+_lgcMoney(target),
-              hasData?(perPerson<target?'#D94040':'#00C07F'):'');
+              hasData?(perPerson>target?'#D94040':'#00C07F'):'');   // over the cap is the warning
 
   // ── Projected month end, weekday by weekday ──
   var projCost=_mpProject_(byDay,ym,daysInMonth);
@@ -4849,7 +4853,7 @@ function renderManpower(){
     +_lgcTile('Proj. Person-Days',Math.round(projPersonDays).toLocaleString(),
               sd.daysLogged?('at the rate of '+sd.daysLogged+' logged day'+(sd.daysLogged===1?'':'s')):'no staff log','')
     +_lgcTile('Proj. Deliveries / Person',projHas?_lgcMoney(projPerPerson):'—','target '+_lgcMoney(target),
-              projHas?(projPerPerson<target?'#D94040':'#00C07F'):'');
+              projHas?(projPerPerson>target?'#D94040':'#00C07F'):'');  // likewise
 
   // ── By supplier ──
   var sups=Object.keys(bySupplier).map(function(k){return bySupplier[k];})
