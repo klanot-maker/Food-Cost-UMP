@@ -4777,6 +4777,12 @@ function renderManpower(){
     +(mpRowCount?'refreshed':'loaded')+': '+_mpErr
     +(mpRowCount?' The figures below are the last ones that loaded and may be out of date.':'')
     +'</span>');
+  // An error on the payload itself, rather than on one of the two books —
+  // the server could not get as far as opening either.
+  if(MP_DATA&&MP_DATA.error){
+    mpOk=false;
+    hint.push('<span style="color:var(--red);font-weight:700;">'+MP_DATA.error+'</span>');
+  }
   ['kitchen','dispatch'].forEach(function(a){
     var b=MP_DATA&&MP_DATA[a];
     if(b&&b.error){ mpOk=false;

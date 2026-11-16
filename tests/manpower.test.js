@@ -178,6 +178,20 @@ t('a workbook with no Attendance tab says so',
 t('an unconfigured id is not an error', _mpReadBook_('', 'kitchen').skipped, 'not configured');
 
 // ── getManpowerData ─────────────────────────────────────────
+// Config.gs and Dashboard.gs are pasted as separate files and can end up out
+// of step — which is exactly what happened: the new Dashboard.gs went in
+// without the Config.gs that defines these, and the page reported
+// "ReferenceError: SS_MP_KITCHEN_ is not defined". Name the file instead.
+{
+  const k = global.SS_MP_KITCHEN_, d = global.SS_MP_DISPATCH_;
+  delete global.SS_MP_KITCHEN_;
+  const stale = getManpowerData(true);
+  t('an out-of-date Config.gs is named, not a missing symbol',
+    /Config\.gs is older than Dashboard\.gs/.test(stale.error || ''), true);
+  t('and nothing is reported as loaded', [stale.kitchen, stale.dispatch], [null, null]);
+  global.SS_MP_KITCHEN_ = k; global.SS_MP_DISPATCH_ = d;
+}
+
 KID = ''; DID = '';
 t('neither book configured reports configured:false', getManpowerData(true).configured, false);
 KID = 'K'; DID = '';

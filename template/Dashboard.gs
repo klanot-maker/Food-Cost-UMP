@@ -383,6 +383,15 @@ function _mpRates_(ss) {
 }
 
 function getManpowerData(force) {
+  // Config.gs and Dashboard.gs are pasted separately and can end up out of
+  // step. Without this, the older file shows up as
+  // "ReferenceError: SS_MP_KITCHEN_ is not defined", which names a symbol
+  // rather than the file to fix.
+  if (typeof SS_MP_KITCHEN_ !== 'function' || typeof SS_MP_DISPATCH_ !== 'function') {
+    return { configured: true, kitchen: null, dispatch: null,
+             error: 'Config.gs is older than Dashboard.gs — it has no manpower settings yet. ' +
+                    'Paste the current Config.gs, save, and deploy a new version.' };
+  }
   var kId = SS_MP_KITCHEN_(), dId = SS_MP_DISPATCH_();
   if (!kId && !dId) return { configured: false, kitchen: null, dispatch: null };
 
