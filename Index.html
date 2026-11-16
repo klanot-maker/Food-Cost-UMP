@@ -4463,6 +4463,23 @@ function _mpInit(){
   }
   var months={};
   _mpAllRows().forEach(function(r){ if(r.ds) months[r.ds.substring(0,7)]=1; });
+
+  // Also from deliveries and the staff log. The list used to come only from
+  // the agency books, so when those failed to load the dropdown collapsed to
+  // the current month and October looked as though it had never existed.
+  // Deliveries per person does not need the agency books at all, so those
+  // months are worth offering either way.
+  ((DATA.deliveries&&DATA.deliveries.records)||[]).forEach(function(r){
+    if(r.dateStr) months[r.dateStr.substring(0,7)]=1;
+  });
+  ((DATA.staff&&DATA.staff.sections)||[]).forEach(function(s){
+    var n=s.sheetName||'', yr=(n.match(/(20\d\d)/)||[])[1];
+    if(!yr) return;
+    for(var i=0;i<12;i++){
+      if(n.indexOf(MO_LNG[i])>=0){ months[yr+'-'+('0'+(i+1)).slice(-2)]=1; break; }
+    }
+  });
+
   var nowYM=_mpCurrentYM();
   months[nowYM]=1;                      // offered even with nothing logged yet
 
@@ -4627,45 +4644,38 @@ function _mpDelta(cur, prev){
  * of the cost ratios on the Logistics page: falling short of 23 deliveries a
  * head is the warning, not exceeding it.
  */
+/**
+ * A caption line, deliberately NOT a banner.
+ *
+ * This used to be a full-width coloured block, which is exactly what the
+ * Logistics page uses for its cost verdicts — the same shape in the same
+ * colours for a different measurement read as the same thing. The figure
+ * itself already has a tile below, coloured against the target, so the block
+ * was saying it twice as well. What is left is the working: where the number
+ * came from, and what it is being judged against.
+ */
 function _mpVerdict(title, value, target, note, hasData, why){
-  // A quieter banner than the solid blocks on the Logistics page. These two
-  // sit directly above their own tiles, and two full-width slabs of colour
-  // one after the other drown the figures they are introducing. The colour
-  // now carries on an edge and the number, with the text left readable.
-  function shell(accent, tint, lbl, big, line1, line2, bar){
-    return '<div style="display:flex;flex-wrap:wrap;gap:20px;align-items:center;background:'+tint
-      +';border:1px solid '+accent+'40;border-left:5px solid '+accent
-      +';border-radius:var(--rs);padding:13px 18px;margin-bottom:12px;">'
-      +'<div style="min-width:155px;">'
-      +'<div style="font-size:9.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);">'+lbl+'</div>'
-      +'<div style="font-size:33px;font-weight:800;line-height:1.15;color:'+accent+';">'+big+'</div>'
-      +'</div>'
-      +'<div style="flex:1;min-width:240px;">'
-      +'<div style="font-size:13px;font-weight:700;color:var(--txt);">'+line1+'</div>'
-      +'<div style="font-size:11px;color:var(--mut);margin-top:3px;">'+line2+'</div>'
-      +(bar===null?'':'<div style="height:6px;border-radius:3px;background:rgba(0,0,0,0.07);margin-top:9px;overflow:hidden;">'
-        +'<div style="height:100%;width:'+Math.max(0,Math.min(100,bar))+'%;background:'+accent+';"></div></div>')
-      +'</div></div>';
-  }
-
+  var wrap=function(inner){
+    return '<div style="font-size:12px;line-height:1.6;color:var(--mut);margin:2px 0 12px;">'+inner+'</div>';
+  };
   if(!hasData){
-    return shell('#C07A10','#FEF7EC',title,'—',
-      '⚠️ '+(why||'No data for this month yet.'),
-      'Nothing to measure against the target until this is resolved.',null);
+    return wrap('<span style="color:#B06A08;font-weight:700;">'+title+': no figure — </span>'
+      +'<span style="color:var(--txt);">'+(why||'no data for this month yet.')+'</span>');
   }
   var under=value<target;
-  var accent=under?'#D94040':'#00A56C';
-  var tint  =under?'#FDF2F2':'#EDFAF4';
-  var diff=Math.abs(value-target);
+  var accent=under?'#C62828':'#00855A';
   var pctOfTarget=target>0?(value/target*100):0;
-  var msg=under
-    ? 'Below target by '+_lgcMoney(diff)+' deliveries per person'
-    : 'At or above target — '+_lgcMoney(diff)+' per person above';
-  return shell(accent,tint,title+' — deliveries / person',_lgcMoney(value),
-    (under?'⚠️ ':'✅ ')+msg
-      +(target>0?(' ('+(Math.round(Math.abs(pctOfTarget-100)*10)/10)+'% '+(under?'under':'over')+')'):''),
-    'Target '+_lgcMoney(target)+' · running at '+(Math.round(pctOfTarget*10)/10)+'% of target'+(note?' · '+note:''),
-    pctOfTarget);
+  var diff=Math.abs(value-target);
+  return wrap(
+     '<span style="color:var(--lt);text-transform:uppercase;letter-spacing:.08em;font-size:9.5px;font-weight:700;">'+title+'</span>'
+    +'<span style="color:'+accent+';font-weight:800;font-size:15px;margin:0 6px;">'+_lgcMoney(value)+'</span>'
+    +'<span style="color:var(--txt);font-weight:600;">deliveries per person — </span>'
+    +'<span style="color:'+accent+';font-weight:700;">'
+      +(under?'below the '+_lgcMoney(target)+' target by '+_lgcMoney(diff)
+             :'at or above the '+_lgcMoney(target)+' target, by '+_lgcMoney(diff))
+      +'</span>'
+    +'<span style="color:var(--lt);"> ('+(Math.round(pctOfTarget*10)/10)+'% of target)</span>'
+    +(note?'<br><span style="color:var(--lt);">'+note+'</span>':''));
 }
 
 function renderManpower(){
